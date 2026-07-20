@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Xcode: estado local del usuario, no del proyecto
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Productos de compilacion
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+# Package.resolved SI se versiona: fija la version de AMSMB2 y hace que la
+# compilacion sea reproducible en otra maquina.
+.swiftpm/
+.build/
+Packages/

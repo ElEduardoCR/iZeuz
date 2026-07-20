@@ -1,0 +1,44 @@
+# Nombres estables para los adaptadores USB-RS232 del puente.
+#
+# ## El problema
+#
+# Con un hub de varios adaptadores, /dev/ttyUSB0, ttyUSB1… se asignan por
+# orden de deteccion al arrancar. Ese orden CAMBIA entre reinicios: el que
+# hoy es ttyUSB0 manana puede ser ttyUSB2. Si eso pasa, el programa del torno
+# se va a la fresadora — con la maquina en modo recepcion y sin aviso.
+#
+# ## La solucion
+#
+# Anclar cada adaptador a un nombre fijo por su numero de serie, y apuntar
+# ser2net a ese nombre en vez de a /dev/ttyUSBx.
+#
+# ## Como obtener el numero de serie de cada adaptador
+#
+# Conecta UNO a la vez y corre:
+#
+#     udevadm info -a -n /dev/ttyUSB0 | grep -E 'ATTRS\{(serial|idVendor|idProduct)\}' | head -5
+#
+# Anota el ATTRS{serial} y repite con el siguiente.
+#
+# ## Instalacion
+#
+#     sudo cp 99-cnc-serial.rules /etc/udev/rules.d/
+#     sudo udevadm control --reload-rules && sudo udevadm trigger
+#     ls -l /dev/cnc-*
+#
+# Luego en ser2net.yaml cambia el connector a, por ejemplo:
+#
+#     connector: serialdev,/dev/cnc-torno,9600n81,local
+
+# Sustituye los numeros de serie por los tuyos y ajusta los nombres.
+SUBSYSTEM=="tty", ATTRS{serial}=="AB0KMTQ1", SYMLINK+="cnc-torno"
+SUBSYSTEM=="tty", ATTRS{serial}=="AB0KMTQ2", SYMLINK+="cnc-fresadora"
+SUBSYSTEM=="tty", ATTRS{serial}=="AB0KMTQ3", SYMLINK+="cnc-centro"
+
+# Si tus adaptadores son clones baratos sin numero de serie unico (muchos
+# CH340 comparten el mismo), ancla por el puerto FISICO del hub: el nombre
+# depende de en que boca lo enchufes, asi que etiqueta las bocas del hub.
+# Obten la ruta con:  udevadm info -a -n /dev/ttyUSB0 | grep KERNELS | head -3
+#
+# SUBSYSTEM=="tty", KERNELS=="1-1.2", SYMLINK+="cnc-boca1"
+# SUBSYSTEM=="tty", KERNELS=="1-1.3", SYMLINK+="cnc-boca2"

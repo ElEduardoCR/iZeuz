@@ -1,0 +1,69 @@
+# Puente serial para ZeuzDNC iOS
+#
+# Convierte la Raspberry Pi (o cualquier Linux) en el puente que le falta al
+# iPhone: la app manda el G-code por WiFi y esto lo saca por el adaptador
+# USB-RS232 hacia la CNC.
+#
+# ser2net soporta RFC 2217, asi que la app puede fijar baudrate, paridad y
+# bits en cada envio segun el perfil de la maquina — sin reconfigurar nada
+# aqui al cambiar de CNC.
+#
+# ## Instalacion en la Raspberry Pi
+#
+#     sudo apt update && sudo apt install -y ser2net
+#     sudo cp ser2net.yaml /etc/ser2net.yaml
+#     sudo systemctl enable --now ser2net
+#     systemctl status ser2net
+#
+# ## Comprobar que esta escuchando
+#
+#     ss -tlnp | grep 419
+#
+# Despues, en la app: Ajustes → Puertos → Puerto nuevo → Puente en red,
+# con la IP de la Pi, el puerto TCP de abajo y "Negociar RFC 2217" encendido.
+
+%YAML 1.1
+---
+
+define: &banner ZeuzDNC bridge \p \s\r\n
+
+# ---------------------------------------------------------------------------
+# Puerto 1 — primer adaptador USB-RS232
+# ---------------------------------------------------------------------------
+connection: &cnc01
+  accepter: telnet(rfc2217),tcp,4196
+  connector: serialdev,/dev/ttyUSB0,9600n81,local
+  options:
+    banner: *banner
+    # Sin esto, dos envios seguidos pueden pisarse si el primero no cerro.
+    max-connections: 1
+    # Deja la linea como la pide la app en vez de forzarla desde aqui.
+    remctl: true
+
+# ---------------------------------------------------------------------------
+# Puertos 2 a 4 — para un hub con varios adaptadores.
+# Descomenta los que uses. En la app se dan de alta con "Puente con hub".
+# ---------------------------------------------------------------------------
+# connection: &cnc02
+#   accepter: telnet(rfc2217),tcp,4197
+#   connector: serialdev,/dev/ttyUSB1,9600n81,local
+#   options:
+#     banner: *banner
+#     max-connections: 1
+#     remctl: true
+#
+# connection: &cnc03
+#   accepter: telnet(rfc2217),tcp,4198
+#   connector: serialdev,/dev/ttyUSB2,9600n81,local
+#   options:
+#     banner: *banner
+#     max-connections: 1
+#     remctl: true
+#
+# connection: &cnc04
+#   accepter: telnet(rfc2217),tcp,4199
+#   connector: serialdev,/dev/ttyUSB3,9600n81,local
+#   options:
+#     banner: *banner
+#     max-connections: 1
+#     remctl: true
