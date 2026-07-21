@@ -59,7 +59,12 @@ struct SerialEndpoint: Identifiable, Codable, Hashable, Sendable {
 
 extension SerialEndpoint {
     enum Kind: String, Codable, CaseIterable, Hashable, Sendable {
-        /// TCP a un servidor serial en la WiFi (Raspberry Pi, ESP32, Moxa, USR).
+        /// Le delega el envio al ZeuzDNC que ya corre en la Raspberry Pi: el
+        /// iPhone manda la orden por HTTP y la Pi saca el G-code por su propio
+        /// cable serial, con el perfil de maquina que ella ya tiene. Es el modo
+        /// para reusar una Pi que ya funciona, sin cable MFi ni tocar el puerto.
+        case zeuzBridge
+        /// TCP a un servidor serial en la WiFi (ser2net, ESP32, Moxa, USR).
         case networkBridge
         /// Cable serial certificado MFi conectado al telefono (Redpark).
         case mfiCable
@@ -68,6 +73,7 @@ extension SerialEndpoint {
 
         var label: String {
             switch self {
+            case .zeuzBridge: "Puente ZeuzDNC (Raspberry Pi)"
             case .networkBridge: "Puente en red (WiFi)"
             case .mfiCable: "Cable MFi (Redpark)"
             case .simulator: "Simulador (sin hardware)"
@@ -76,9 +82,19 @@ extension SerialEndpoint {
 
         var icon: String {
             switch self {
+            case .zeuzBridge: "server.rack"
             case .networkBridge: "wifi"
             case .mfiCable: "cable.connector"
             case .simulator: "testtube.2"
+            }
+        }
+
+        /// Puerto TCP por defecto de cada tipo. El ZeuzDNC de la Pi sirve su
+        /// API Flask en el 5000; un ser2net/Moxa suele exponer 4196/4001.
+        var defaultPort: Int {
+            switch self {
+            case .zeuzBridge: 5000
+            case .networkBridge, .mfiCable, .simulator: 4196
             }
         }
     }
@@ -91,6 +107,9 @@ extension SerialEndpoint {
     /// Descripcion corta del destino, para la lista de puertos.
     var destination: String {
         switch kind {
+        case .zeuzBridge:
+            let base = host.isEmpty ? "sin IP" : "\(host):\(port)"
+            return bridgePort.isEmpty ? base : "\(base) → \(bridgePort)"
         case .networkBridge:
             let base = host.isEmpty ? "sin host" : "\(host):\(port)"
             return bridgePort.isEmpty ? base : "\(base) → \(bridgePort)"
@@ -126,7 +145,7 @@ extension SerialEndpoint {
         guard !copy.name.isEmpty else { throw EndpointValidationError.emptyName }
 
         switch kind {
-        case .networkBridge:
+        case .zeuzBridge, .networkBridge:
             copy.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !copy.host.isEmpty else { throw EndpointValidationError.emptyHost }
             guard (1...65535).contains(port) else { throw EndpointValidationError.invalidPort }

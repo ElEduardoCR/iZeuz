@@ -18,6 +18,16 @@
 		<string>_device-info._tcp</string>
 	</array>
 
+	<!-- El puente ZeuzDNC habla HTTP plano con la Raspberry Pi en la LAN
+	     (http://192.168.x.x:5000). App Transport Security bloquea HTTP por
+	     defecto; NSAllowsLocalNetworking lo permite SOLO hacia la red local
+	     (rangos privados, .local y link-local), sin abrir HTTP a internet. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+
 	<!-- Protocolos de accesorio MFi. Solo cables certificados: un adaptador
 	     USB-RS232 generico (FTDI, CH340, PL2303) NO aparece aqui porque iOS
 	     no lo reconoce. Ajusta la cadena a la del cable que uses; debe

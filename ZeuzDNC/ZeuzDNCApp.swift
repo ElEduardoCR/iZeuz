@@ -63,12 +63,42 @@ final class AppModel {
         blockers.isEmpty && !transfer.isSending
     }
 
+    // MARK: - Sincronizacion de maquinas con la Pi
+
+    /// Cliente del puente ZeuzDNC con el que sincronizar. Usa el puerto elegido
+    /// si es un puente, y si no el primero que haya dado de alta: los perfiles
+    /// de maquina son de la Pi aunque en este momento se este apuntando a otro
+    /// puerto.
+    var bridgeClient: ZeuzBridgeClient? {
+        let endpoint = endpoints.selected.flatMap { $0.kind == .zeuzBridge ? $0 : nil }
+            ?? endpoints.endpoints.first { $0.kind == .zeuzBridge }
+        guard let endpoint, !endpoint.host.isEmpty else { return nil }
+        return ZeuzBridgeClient(host: endpoint.host, port: endpoint.port)
+    }
+
+    /// Trae los perfiles de la Pi. Devuelve el mensaje de error, o nil si fue bien.
+    func syncMachinesFromPi() async -> String? {
+        guard let bridgeClient else {
+            return "Da de alta un puerto \"Puente ZeuzDNC\" con la IP de la Raspberry Pi para sincronizar."
+        }
+        do {
+            try await machines.syncFromPi(bridgeClient)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     func connectIfPossible() async {
         guard smbSettings.settings.isConfigured else { return }
         await programs.connect(
             settings: smbSettings.settings,
             password: smbSettings.password
         )
+        // Al arrancar, dejamos los perfiles iguales a los de la Pi sin que haya
+        // que acordarse de sincronizar a mano. Si la Pi no responde, se ignora:
+        // no es motivo para bloquear la app.
+        _ = await syncMachinesFromPi()
     }
 
     func reconnect() async {

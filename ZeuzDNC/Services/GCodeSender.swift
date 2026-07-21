@@ -114,6 +114,33 @@ final class TransferController {
     ) {
         guard !isSending else { return }
 
+        // El puente ZeuzDNC no saca bytes el mismo: le da la orden a la Pi. Por
+        // eso no arma payload ni transporte; el total de bytes lo reporta la Pi.
+        if endpoint.kind == .zeuzBridge {
+            state = TransferState(
+                status: .connecting,
+                fileName: document.name,
+                machineName: machine.name,
+                endpointName: endpoint.name,
+                bytesSent: 0,
+                totalBytes: 0,
+                message: "Enviando la orden a \(endpoint.name)…"
+            )
+            task = Task { [weak self] in
+                let events = ZeuzBridgeSender.send(
+                    document: document,
+                    machine: machine,
+                    endpoint: endpoint
+                )
+                for await event in events {
+                    guard let self else { return }
+                    self.apply(event)
+                }
+                self?.task = nil
+            }
+            return
+        }
+
         let payload = GCodeSender.preparePayload(
             content: document.content,
             terminator: machine.lineTerminator

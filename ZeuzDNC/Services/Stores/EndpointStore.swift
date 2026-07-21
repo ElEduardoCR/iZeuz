@@ -84,7 +84,7 @@ final class EndpointStore {
         switch endpoint.kind {
         case .simulator:
             return .ready
-        case .networkBridge:
+        case .zeuzBridge, .networkBridge:
             return endpoint.host.isEmpty ? .notConfigured : .unknown
         case .mfiCable:
             let matches = connectedAccessories.contains { accessory in

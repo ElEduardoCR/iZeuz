@@ -3,11 +3,14 @@ import SwiftUI
 /// Lista de maquinas: seleccionar, editar, eliminar y dar de alta nuevas.
 /// Todo desde la app, sin tocar archivos de configuracion.
 struct MachineListView: View {
+    @Environment(AppModel.self) private var model
     @Environment(MachineStore.self) private var machines
     @Environment(\.dismiss) private var dismiss
 
     @State private var editing: Machine?
     @State private var isCreating = false
+    @State private var isSyncing = false
+    @State private var syncError: String?
 
     var body: some View {
         NavigationStack {
@@ -21,13 +24,17 @@ struct MachineListView: View {
                     Text("Maquinas dadas de alta")
                 } footer: {
                     Text(
-                        "Los perfiles de Fanuc y Fadal son valores tipicos de referencia. "
-                            + "Confirmalos contra el manual de cada control antes de usarlos en produccion."
+                        machines.piBackedIDs.isEmpty
+                            ? "Los perfiles de fabrica son valores tipicos de referencia. Sincroniza con "
+                                + "la Raspberry Pi para traer los perfiles reales de tus maquinas."
+                            : "Las marcadas con PI vienen de la Raspberry Pi y son las que ella usa al "
+                                + "enviar. Editarlas aqui tambien las cambia alla: una sola configuracion."
                     )
                 }
             }
             .navigationTitle("Maquinas")
             .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) { syncBar }
             .overlay {
                 if machines.machines.isEmpty {
                     EmptyStateView(
@@ -57,7 +64,59 @@ struct MachineListView: View {
             .sheet(isPresented: $isCreating) {
                 MachineEditorView(machine: nil)
             }
+            .alert("No se pudo sincronizar", isPresented: Binding(
+                get: { syncError != nil },
+                set: { if !$0 { syncError = nil } }
+            )) {
+                Button("Entendido", role: .cancel) { syncError = nil }
+            } message: {
+                Text(syncError ?? "")
+            }
         }
+    }
+
+    // MARK: - Sincronizacion
+
+    private var syncBar: some View {
+        VStack(spacing: 8) {
+            Button {
+                Task { await sync() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isSyncing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    Text(isSyncing ? "Sincronizando…" : "Sincronizar con la Raspberry Pi")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.glassProminent)
+            .disabled(isSyncing)
+
+            Text(syncStatus)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
+    }
+
+    private var syncStatus: String {
+        guard let last = machines.lastSync else {
+            return "La Pi manda: al enviar por el puente usa SU configuracion, no la del telefono."
+        }
+        return "Ultima sincronizacion: \(last.formatted(date: .omitted, time: .shortened))"
+    }
+
+    private func sync() async {
+        isSyncing = true
+        defer { isSyncing = false }
+        syncError = await model.syncMachinesFromPi()
     }
 
     private func row(_ machine: Machine) -> some View {
@@ -77,6 +136,14 @@ struct MachineListView: View {
                             Text(machine.name)
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(.primary)
+                            if machines.isPiBacked(machine) {
+                                Text("PI")
+                                    .font(.caption2.weight(.bold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(ZeuzPalette.accent.opacity(0.2), in: .capsule)
+                                    .foregroundStyle(ZeuzPalette.accent)
+                            }
                             if machine.dripFeed {
                                 Text("GOTEO")
                                     .font(.caption2.weight(.bold))
@@ -109,6 +176,7 @@ struct MachineListView: View {
 
 /// Alta y edicion de un perfil de maquina.
 struct MachineEditorView: View {
+    @Environment(AppModel.self) private var model
     @Environment(MachineStore.self) private var machines
     @Environment(\.dismiss) private var dismiss
 
@@ -117,6 +185,12 @@ struct MachineEditorView: View {
 
     @State private var draft: Machine
     @State private var errorMessage: String?
+    @State private var isSaving = false
+
+    /// La maquina vive en la Pi: al guardar hay que cambiarla alla tambien.
+    private var isPiBacked: Bool {
+        machine.map { machines.isPiBacked($0) } ?? false
+    }
 
     init(machine: Machine?) {
         self.machine = machine
@@ -225,8 +299,12 @@ struct MachineEditorView: View {
                     Button("Cancelar") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Guardar") { save() }
-                        .fontWeight(.semibold)
+                    if isSaving {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Guardar") { Task { await save() } }
+                            .fontWeight(.semibold)
+                    }
                 }
             }
             .alert("Revisa el perfil", isPresented: Binding(
@@ -240,9 +318,19 @@ struct MachineEditorView: View {
         }
     }
 
-    private func save() {
+    /// Guarda el perfil. Si la maquina es de la Pi, el cambio va **primero a la
+    /// Pi** y solo se guarda local si alla se acepto: asi nunca queda un valor
+    /// en el telefono que la Pi no tenga (que es justo lo que descuadraba todo).
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
         do {
-            let saved = try machines.save(draft)
+            let saved: Machine
+            if isPiBacked, let client = model.bridgeClient {
+                saved = try await machines.saveToPi(draft, using: client)
+            } else {
+                saved = try machines.save(draft)
+            }
             // Al dar de alta una maquina nueva, lo mas probable es que sea la
             // que se va a usar: la dejamos seleccionada.
             if isNew { machines.select(saved) }

@@ -15,17 +15,18 @@ problema de programacion: iOS no expone ninguna API publica para periféricos
 USB genericos. No existe `/dev/ttyUSB0`. Los chips FTDI, CH340, PL2303 y
 similares son invisibles para el sistema, conectes el cable que conectes.
 
-Esta app resuelve el problema por los dos unicos caminos que iOS permite:
+Esta app resuelve el problema por los caminos que iOS permite:
 
 | Camino | Como funciona | Cuando usarlo |
 |---|---|---|
-| **Puente en red** (recomendado) | El iPhone manda el G-code por WiFi a un puente que lo saca por RS232 | Ya tienes una Raspberry Pi. Cero hardware certificado |
+| **Puente ZeuzDNC** (recomendado) | El iPhone le da la orden por WiFi a una Raspberry Pi que **ya corre ZeuzDNC**; ella saca el G-code con su config | Ya tienes la Pi enviando a la maquina. Cero hardware nuevo, cero setup |
+| **Puente en red (ser2net)** | El iPhone saca los bytes por TCP; la Pi es solo un cable | Tienes una Pi pero SIN ZeuzDNC, o un servidor serial (Moxa, USR) |
 | **Cable MFi** | Cable certificado Redpark directo del iPhone al DB9 | Sin red disponible, o el iPhone tiene que estar junto a la maquina |
 
 El tramo final **DB9 → DB25 sigue siendo solo cableado**: eso no cambia.
 
 La app tiene una capa de transporte intercambiable, asi que el mismo binario
-sirve para los dos y para un simulador sin hardware. Cambiar de uno a otro es
+sirve para los tres y para un simulador sin hardware. Cambiar de uno a otro es
 elegir otro puerto en la interfaz.
 
 ---
@@ -75,7 +76,50 @@ recarga solo si cambio.
 
 ### 3. Configurar el puente serial
 
-#### Opcion A — Raspberry Pi (la que ya tienes)
+#### Opcion A — Raspberry Pi que YA corre ZeuzDNC (recomendada si la tienes)
+
+Si ya tienes una Raspberry Pi con el ZeuzDNC de la Pi conectada a la maquina
+y enviando programas, **no hace falta instalar nada ni tocar el puerto**. El
+iPhone le **delega** el envio: le da la orden por HTTP y la Pi saca el G-code
+por su propio cable, con el perfil de maquina que ella ya tiene probado.
+
+En la app: **Ajustes → Puertos → Puerto nuevo → "Puente ZeuzDNC (Raspberry
+Pi)"**. Pon la IP que muestra la pantalla de la Pi y el puerto `5000`.
+
+| Campo | Valor |
+|---|---|
+| IP | la de la Pi (ej. `192.168.1.50`) |
+| Puerto HTTP | `5000` |
+| Puerto serial | vacio (con un solo adaptador la Pi lo elige sola) |
+
+**Los perfiles de maquina se sincronizan desde la Pi.** En **Ajustes → Maquinas
+→ Sincronizar con la Raspberry Pi** el telefono trae los perfiles reales de
+ella y los marca con **PI**. Tambien se sincroniza solo al abrir la app.
+
+Esto importa mas de lo que parece: al enviar por el puente, **la config serial
+la aplica la Pi**, no el iPhone. Sin sincronizar puedes estar viendo `9600 8N1`
+en el telefono mientras la Pi manda a `38400 7E1` — y perseguir un "error de
+paridad" que en realidad es que estabas leyendo la configuracion equivocada.
+
+Editar una maquina marcada **PI** desde el telefono **la cambia tambien en la
+Pi**: hay una sola configuracion, no dos que se desincronizan. La maquina se
+empareja por **nombre**, asi que despues de sincronizar los nombres ya coinciden
+solos.
+
+Al picar **ENVIAR**, el iPhone hace, contra la API que ZeuzDNC ya expone:
+elige la maquina (`/api/machine/select`) y **da la orden** (`/api/send`) sobre
+el archivo que **ya esta en la Pi**; luego sondea `/api/transfer/status` para la
+barra de progreso. **No reescribe el programa** — manda el mismo archivo que el
+boton de la pantalla de la Pi, byte por byte. Por eso el iPhone edita y guarda
+por SMB directo sobre la carpeta de la Pi: asi el archivo ya esta actualizado
+cuando llega la orden.
+
+> **Probar sin la maquina:** `python3 Tools/fake_zeuz_pi.py` levanta una Pi
+> falsa que reproduce el envio (0→100%, finalizar, cancelar) sin abrir ningun
+> puerto serial. Apunta el puerto de la app a la IP de tu Mac y pruebalo antes
+> de confiarle el torno.
+
+#### Opcion B — Raspberry Pi con ser2net (si NO usas ZeuzDNC en la Pi)
 
 ```bash
 sudo apt update && sudo apt install -y ser2net
@@ -83,9 +127,11 @@ sudo cp Tools/bridge/ser2net.yaml /etc/ser2net.yaml
 sudo systemctl enable --now ser2net
 ```
 
+Aqui el iPhone saca los bytes el mismo por TCP y la Pi es solo un cable:
 `ser2net` soporta RFC 2217, asi que la app le dice el baudrate, paridad y
-bits en cada envio segun el perfil de la maquina. No hay que reconfigurar
-nada al cambiar de CNC.
+bits en cada envio segun el perfil de la maquina. Usa el tipo de puerto
+**"Puente en red (WiFi)"**. No mezcles esto con ZeuzDNC en la misma Pi: los
+dos pelearian por el puerto serial.
 
 **Con un hub de varios adaptadores**, descomenta los puertos extra en
 `ser2net.yaml` y **anclalos con nombres estables**:
@@ -100,14 +146,14 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 > en la fresadora sin ningun aviso. El archivo de reglas explica como sacar
 > el numero de serie de cada adaptador.
 
-#### Opcion B — servidor serial comercial
+#### Opcion C — servidor serial comercial
 
 Moxa NPort, USR-TCP232 y similares funcionan directo. Suelen exponer un
 puerto TCP por cada puerto fisico (4001, 4002…). Si soportan RFC 2217,
 enciendelo en la app; si no, deja apagada esa opcion y configura el baudrate
 en el propio equipo.
 
-#### Opcion C — cable MFi (sin red)
+#### Opcion D — cable MFi (sin red)
 
 Cables certificados **Redpark**: `C4-DB9V` (iPhone USB-C) o `L2-DB9V3`
 (Lightning). Es el unico tipo de cable que iOS acepta para RS232.
@@ -131,11 +177,17 @@ Tres cosas que hay que saber antes de comprarlo:
 quieras (*Torno chico*, *Fresadora del fondo*). Para un hub, usa **Puente con
 hub** y los crea todos de golpe.
 
-**Ajustes → Maquinas.** Vienen Fanuc (4800 7E2, XON/XOFF, CR) y Fadal
-(9600 8N1, XON/XOFF, CRLF) como referencia.
+**Ajustes → Maquinas.** Si usas el puente ZeuzDNC, lo primero es
+**Sincronizar con la Raspberry Pi**: trae los perfiles reales de tus maquinas
+y sustituye a los de fabrica. Quedan marcados con **PI** y editarlos aqui los
+cambia tambien alla.
 
-> ⚠️ Esos valores son **tipicos, no verificados para tu maquina**. Confirmalos
-> contra el manual de cada control antes de produccion.
+Sin Pi (cable MFi o ser2net) los perfiles se dan de alta a mano; vienen Fanuc
+(4800 7E2, XON/XOFF, CR) y Fadal (9600 8N1, XON/XOFF, CRLF) solo como semilla.
+
+> ⚠️ Los valores de fabrica son **tipicos, no verificados para tu maquina** — y
+> es muy probable que no se parezcan a los tuyos. Sincroniza con la Pi, o
+> confirmalos contra el manual de cada control antes de produccion.
 
 ### 5. Probar sin hardware
 
@@ -183,16 +235,18 @@ ZeuzDNC/
   ZeuzDNCApp.swift              AppModel: une las piezas y decide si se puede enviar
   Models/
     Machine.swift               Perfil serial (baudrate, bits, paridad, flujo, terminador)
-    SerialEndpoint.swift        Puerto con nombre libre (red / MFi / simulador)
+    SerialEndpoint.swift        Puerto con nombre libre (ZeuzDNC / red / MFi / simulador)
     ProgramEntry.swift          Archivos, carpetas y breadcrumb
     TransferState.swift         Estado y eventos de la transferencia
   Services/
     GCodeSender.swift           Payload, troceado, progreso, cancelacion
     Transport/
       SerialTransport.swift     El protocolo que abstrae "por donde salen los bytes"
-      NetworkBridgeTransport.swift  TCP + RFC 2217 + XON/XOFF
+      NetworkBridgeTransport.swift  TCP + RFC 2217 + XON/XOFF (ser2net, Moxa)
       MFiSerialTransport.swift  ExternalAccessory (cables Redpark)
       MockTransport.swift       Simulador a velocidad real
+      ZeuzBridgeClient.swift    Cliente HTTP de la API Flask de la Pi
+      ZeuzBridgeSender.swift    Envio delegado: da la orden y sigue el progreso
       TransportFactory.swift
     SMB/
       SMBClient.swift           Cliente SMB2/3 sobre AMSMB2
@@ -209,6 +263,8 @@ ZeuzDNC/
       GCodeEditor.swift         UITextView con coloreado en vivo + leyenda
 Tools/
   verify.sh                     Pruebas del nucleo de envio
+  fake_zeuz_pi.py               Raspberry Pi falsa para probar el modo ZeuzDNC
+  fake_bridge.py                Puente serial falso (para el modo ser2net)
   bridge/                       Configuracion del puente para la Pi
 ```
 

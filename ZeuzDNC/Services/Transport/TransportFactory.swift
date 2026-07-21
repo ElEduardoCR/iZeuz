@@ -14,6 +14,11 @@ enum TransportFactory {
             MFiSerialTransport(endpoint: endpoint)
         case .simulator:
             MockTransport()
+        case .zeuzBridge:
+            // El puente ZeuzDNC no fluye bytes por `SerialTransport`: lo maneja
+            // `TransferController` con `ZeuzBridgeSender`, asi que no debe llegar
+            // aqui nunca.
+            preconditionFailure("El puente ZeuzDNC no usa SerialTransport")
         }
     }
 }

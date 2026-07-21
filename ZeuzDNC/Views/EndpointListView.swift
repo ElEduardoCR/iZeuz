@@ -190,9 +190,19 @@ struct EndpointEditorView: View {
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
+                    .onChange(of: draft.kind) { old, new in
+                        // Al cambiar de tipo, si el puerto TCP seguia en el
+                        // default del tipo anterior, se pone el del nuevo (5000
+                        // para ZeuzDNC, 4196 para ser2net). Un valor a mano no
+                        // se toca.
+                        if draft.port == old.defaultPort {
+                            draft.port = new.defaultPort
+                        }
+                    }
                 }
 
                 switch draft.kind {
+                case .zeuzBridge: zeuzBridgeSection
                 case .networkBridge: networkSection
                 case .mfiCable: cableSection
                 case .simulator: simulatorSection
@@ -226,6 +236,53 @@ struct EndpointEditorView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var zeuzBridgeSection: some View {
+        Section {
+            TextField("IP de la Raspberry Pi (192.168.1.50)", text: $draft.host)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            LabeledContent("Puerto HTTP") {
+                TextField("5000", value: $draft.port, format: .number.grouping(.never))
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+            }
+        } header: {
+            Text("Raspberry Pi con ZeuzDNC")
+        } footer: {
+            Text(
+                "El iPhone le da la orden a la Pi y ella manda el G-code a la maquina con su "
+                    + "propia configuracion serial. Usa la IP que muestra la pantalla de la Pi. "
+                    + "El puerto normal es 5000."
+            )
+        }
+
+        Section {
+            TextField("Puerto serial (opcional, /dev/ttyUSB0)", text: $draft.bridgePort)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        } footer: {
+            Text(
+                "Dejalo vacio si la Pi tiene un solo adaptador: ella lo elige sola. Solo hace "
+                    + "falta cuando hay varios cables conectados a la misma Pi."
+            )
+        }
+
+        Section {
+            LabeledContent("Maquina") {
+                Text("por nombre")
+                    .foregroundStyle(.secondary)
+            }
+        } footer: {
+            Text(
+                "La maquina que elijas en el iPhone se empareja con la de la Pi que tenga el "
+                    + "mismo nombre. Manda la configuracion que la Pi tiene guardada para esa maquina."
+            )
         }
     }
 
