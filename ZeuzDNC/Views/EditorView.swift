@@ -10,6 +10,10 @@ struct EditorView: View {
     @State private var findText = ""
     @State private var replaceText = ""
     @State private var showsLegend = false
+    @State private var scrollProgress = 0.0
+    @State private var visibleFraction = 1.0
+    @State private var scrollRequest: GCodeScrollRequest?
+    @State private var cachedLineCount = 0
 
     var body: some View {
         @Bindable var programs = programs
@@ -46,11 +50,36 @@ struct EditorView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            GCodeEditor(text: $programs.draft, isEditable: programs.canEdit)
+            ZStack(alignment: .trailing) {
+                GCodeEditor(
+                    text: $programs.draft,
+                    isEditable: programs.canEdit,
+                    scrollProgress: $scrollProgress,
+                    visibleFraction: $visibleFraction,
+                    scrollRequest: scrollRequest
+                )
+
+                GCodeScrollNavigator(
+                    progress: $scrollProgress,
+                    visibleFraction: visibleFraction,
+                    lineCount: cachedLineCount
+                ) { progress in
+                    scrollRequest = GCodeScrollRequest(progress: progress)
+                }
+                .padding(.trailing, 4)
+                .padding(.vertical, 8)
+            }
 
             statusStrip
         }
         .animation(.smooth(duration: 0.25), value: showsFindBar)
+        .onAppear { updateLineCount() }
+        .onChange(of: programs.draft) { _, _ in updateLineCount() }
+        .onChange(of: programs.document?.path) { _, _ in
+            scrollProgress = 0
+            scrollRequest = GCodeScrollRequest(progress: 0)
+            updateLineCount()
+        }
     }
 
     private var readOnlyBanner: some View {
@@ -90,7 +119,15 @@ struct EditorView: View {
     }
 
     private var lineCount: Int {
-        programs.draft.isEmpty ? 0 : programs.draft.components(separatedBy: .newlines).count
+        cachedLineCount
+    }
+
+    private func updateLineCount() {
+        cachedLineCount = programs.draft.isEmpty
+            ? 0
+            : programs.draft.utf8.reduce(into: 1) { count, byte in
+                if byte == 10 { count += 1 }
+            }
     }
 
     // MARK: - Buscar y reemplazar

@@ -7,6 +7,7 @@ struct ProgramBrowserView: View {
     @Environment(ProgramStore.self) private var programs
 
     @Binding var showsSettings: Bool
+    let bottomClearance: CGFloat
 
     @State private var showsNewProgram = false
     @State private var showsNewFolder = false
@@ -137,6 +138,10 @@ struct ProgramBrowserView: View {
             }
         }
         .listStyle(.insetGrouped)
+        // La barra de envio flota sobre la pantalla. Este margen solo se
+        // agrega al contenido desplazable para que el ultimo programa pueda
+        // subir completamente por encima de ella.
+        .contentMargins(.bottom, bottomClearance, for: .scrollContent)
         .overlay {
             if !isSearchActive, programs.listing.isEmpty, !programs.isLoading {
                 EmptyStateView(
@@ -228,7 +233,12 @@ struct ProgramBrowserView: View {
     }
 
     private func fileRow(_ entry: ProgramEntry, showsPath: Bool = false) -> some View {
-        Button {
+        let parent = SMBPath.parent(of: entry.path)
+        let detail = showsPath && !parent.isEmpty
+            ? "\(parent) · \(entry.metadataLabel)"
+            : entry.metadataLabel
+
+        return Button {
             Task { await programs.open(entry) }
         } label: {
             HStack(spacing: 12) {
@@ -236,10 +246,10 @@ struct ProgramBrowserView: View {
                     .foregroundStyle(programs.document?.path == entry.path ? ZeuzPalette.accent : .secondary)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.name)
+                    Text(entry.displayName)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    Text(showsPath ? SMBPath.parent(of: entry.path) : entry.sizeLabel)
+                    Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

@@ -10,10 +10,25 @@ struct ProgramEntry: Identifiable, Hashable, Sendable {
     var isDirectory: Bool
     var size: Int64
     var modified: Date?
+    /// Texto entre parentesis que acompana al numero O en el encabezado.
+    /// Por ejemplo, para `O0200 (16-312-2)` contiene `(16-312-2)`.
+    var programDescriptor: String? = nil
 
     var sizeLabel: String {
         guard !isDirectory else { return "" }
         return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+
+    var metadataLabel: String {
+        guard !isDirectory else { return "" }
+        guard let modified else { return sizeLabel }
+        let date = modified.formatted(date: .numeric, time: .shortened)
+        return "\(sizeLabel) · \(date)"
+    }
+
+    var displayName: String {
+        guard let programDescriptor else { return name }
+        return "\(name) \(programDescriptor)"
     }
 }
 
@@ -56,5 +71,20 @@ extension ProgramEntry {
 
     static func isIgnored(_ name: String) -> Bool {
         name.hasPrefix(".") || ignoredNames.contains(name)
+    }
+
+    /// Busca la primera linea que contiene un numero de programa OXXXX. Solo
+    /// devuelve el parentesis si esta inmediatamente despues de ese numero.
+    /// Asi `O0050` se queda sin subtitulo y `O0200 (16-312-2)` lo muestra.
+    static func descriptor(in header: String) -> String? {
+        let programNumber = /(?i)\bO\d{4}\b/
+        let numberAndDescriptor = /(?i)\bO\d{4}\b\s*(\([^)\r\n]+\))/
+
+        for line in header.split(whereSeparator: \.isNewline) {
+            guard line.firstMatch(of: programNumber) != nil else { continue }
+            guard let match = line.firstMatch(of: numberAndDescriptor) else { return nil }
+            return String(match.output.1)
+        }
+        return nil
     }
 }

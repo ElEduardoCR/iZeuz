@@ -60,9 +60,26 @@ check(
     GCodeSender.preparePayload(content: "", terminator: .cr).isEmpty
 )
 
-// MARK: - 2. Tiempos de linea
+// MARK: - 2. Encabezado de programa
 
-print("\n[2] Calculo de tiempo fisico de transmision")
+print("\n[2] Descriptor del encabezado de programa")
+
+check(
+    "extrae el parentesis que sigue a OXXXX",
+    ProgramEntry.descriptor(in: "%\r\nO0200 (16-312-2)\r\nG00 X0") == "(16-312-2)"
+)
+check(
+    "no agrega texto cuando OXXXX no lleva parentesis",
+    ProgramEntry.descriptor(in: "O0050\r\nG00 X0 (comentario)") == nil
+)
+check(
+    "acepta el parentesis junto al numero",
+    ProgramEntry.descriptor(in: "O1234(PIEZA A)\nM30") == "(PIEZA A)"
+)
+
+// MARK: - 3. Tiempos de linea
+
+print("\n[3] Calculo de tiempo fisico de transmision")
 
 // Fanuc: 4800 baud, 7E2 -> 1 start + 7 datos + 1 paridad + 2 stop = 11 bits.
 let fanuc = Machine.defaults[0]
@@ -86,7 +103,7 @@ check(
     detail: "\(fadal.transmissionTime(forBytes: 1000))"
 )
 
-// MARK: - 3. Envio real por TCP
+// MARK: - 4. Envio real por TCP
 
 @MainActor func runTransfer(
     port: Int,
@@ -128,7 +145,7 @@ let simplePort = Int(arguments[1])!
 let flowPort = Int(arguments[2])!
 let program = "O0001\nG21 G90\nG00 X10. Y10.\nG01 Z-5. F100\nM30\n"
 
-print("\n[3] Envio real contra un puente TCP")
+print("\n[4] Envio real contra un puente TCP")
 
 // Baudrate alto para que la prueba no tarde: el drain espera el tiempo fisico.
 var fastMachine = Machine(
@@ -154,9 +171,9 @@ check(
     detail: "reporto \(simple.sentBytes)"
 )
 
-// MARK: - 4. Control de flujo XON/XOFF
+// MARK: - 5. Control de flujo XON/XOFF
 
-print("\n[4] Control de flujo: la maquina manda XOFF y el envio se pausa")
+print("\n[5] Control de flujo: la maquina manda XOFF y el envio se pausa")
 
 var flowMachine = fastMachine
 flowMachine.flowControl = .xonXoff
@@ -184,9 +201,9 @@ check(
     detail: "tardo \(elapsed) s, se esperaba > 0.8 s"
 )
 
-// MARK: - 5. Puerto inalcanzable
+// MARK: - 6. Puerto inalcanzable
 
-print("\n[5] Puente apagado: falla con un mensaje entendible")
+print("\n[6] Puente apagado: falla con un mensaje entendible")
 
 let deadEndpoint = SerialEndpoint(
     name: "Apagado",
@@ -209,9 +226,9 @@ check(
     detail: deadEvents.joined(separator: " | ")
 )
 
-// MARK: - 6. Rutas SMB seguras
+// MARK: - 7. Rutas SMB seguras
 
-print("\n[6] Saneado de rutas (path traversal)")
+print("\n[7] Saneado de rutas (path traversal)")
 
 check(
     "'..' no puede salirse de la carpeta compartida",

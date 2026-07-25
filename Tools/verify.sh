@@ -29,6 +29,8 @@ swiftc -swift-version 6 -O -o "$WORK/harness" \
   "$ROOT/ZeuzDNC/Services/Transport/MockTransport.swift" \
   "$ROOT/ZeuzDNC/Services/Transport/MFiSerialTransport.swift" \
   "$ROOT/ZeuzDNC/Services/Transport/TransportFactory.swift" \
+  "$ROOT/ZeuzDNC/Services/Transport/ZeuzBridgeClient.swift" \
+  "$ROOT/ZeuzDNC/Services/Transport/ZeuzBridgeSender.swift" \
   "$ROOT/ZeuzDNC/Services/GCodeSender.swift" \
   "$WORK/main.swift"
 

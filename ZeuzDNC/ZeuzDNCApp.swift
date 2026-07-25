@@ -29,6 +29,8 @@ final class AppModel {
     let transfer = TransferController()
     let smbSettings = SMBSettingsStore()
     let agentSettings = ZeuzAgentSettingsStore()
+    private var connectionMonitorTask: Task<Void, Never>?
+    private let connectionRetryInterval: Duration = .seconds(60)
 
     /// Se muestra la hoja de ajustes al abrir si todavia no hay share.
     var showsOnboarding: Bool {
@@ -94,6 +96,7 @@ final class AppModel {
     }
 
     func connectIfPossible() async {
+        guard programs.connectionState != .connecting else { return }
         if agentSettings.isReady {
             await programs.connect(
                 agent: agentSettings.settings,
@@ -107,6 +110,7 @@ final class AppModel {
         } else {
             return
         }
+        guard !Task.isCancelled, programs.connectionState.isConnected else { return }
         // Al arrancar, dejamos los perfiles iguales a los de la Pi sin que haya
         // que acordarse de sincronizar a mano. Si la Pi no responde, se ignora:
         // no es motivo para bloquear la app.
@@ -116,6 +120,51 @@ final class AppModel {
     func reconnect() async {
         await programs.disconnect()
         await connectIfPossible()
+    }
+
+    // MARK: - Ciclo de vida de la conexion SMB
+
+    /// Al abrir o volver a la app comprueba la sesion inmediatamente. Mientras
+    /// la app siga activa vuelve a intentarlo cada minuto si la red o SMB
+    /// dejaron de responder.
+    func startConnectionMonitoring() {
+        stopConnectionMonitoring()
+        connectionMonitorTask = Task { [weak self] in
+            guard let self else { return }
+            await self.maintainConnection()
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: self.connectionRetryInterval)
+                guard !Task.isCancelled else { return }
+                await self.maintainConnection()
+            }
+        }
+    }
+
+    func stopConnectionMonitoring() {
+        connectionMonitorTask?.cancel()
+        connectionMonitorTask = nil
+        programs.stopAutoRefresh()
+    }
+
+    private func maintainConnection() async {
+        guard (agentSettings.isReady || smbSettings.settings.isConfigured),
+              !transfer.isSending,
+              !programs.isLoading
+        else { return }
+
+        if programs.connectionState.isConnected {
+            // Tambien valida que una sesion que iOS dejo en memoria siga viva.
+            if await programs.refresh(), !Task.isCancelled {
+                programs.startAutoRefresh()
+            } else if !Task.isCancelled {
+                // La sesion guardada ya no servia: se crea otra en el mismo
+                // momento, sin esperar al siguiente intento de un minuto.
+                await connectIfPossible()
+            }
+        } else if programs.connectionState != .connecting {
+            await connectIfPossible()
+        }
     }
 
     // MARK: - Atajos de la lista

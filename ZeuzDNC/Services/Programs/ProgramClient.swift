@@ -14,6 +14,5 @@ protocol ProgramClient: Sendable {
     func createFile(directory: String, name: String) async throws -> String
     func createDirectory(parent: String, name: String) async throws -> String
     func delete(path: String) async throws
-    func fingerprint(path: String) async -> String
+    func fingerprint(path: String) async throws -> String
 }
-

@@ -69,17 +69,33 @@ final class ProgramStore {
             connectionState = .failed(SMBError.notConfigured.localizedDescription)
             return
         }
+        guard connectionState != .connecting else { return }
         stopAutoRefresh()
         connectionState = .connecting
         do {
             let smb = SMBClient()
             try await smb.connect(settings: settings, password: password)
+            guard !Task.isCancelled else {
+                await smb.disconnect()
+                connectionState = .disconnected
+                return
+            }
             client = smb
             connectionState = .connected
-            await navigate(to: "")
+            guard await navigate(to: "") else { return }
+            guard !Task.isCancelled else {
+                await smb.disconnect()
+                client = nil
+                connectionState = .disconnected
+                return
+            }
             startAutoRefresh()
         } catch {
             client = nil
+            guard !Task.isCancelled else {
+                connectionState = .disconnected
+                return
+            }
             connectionState = .failed(error.localizedDescription)
         }
     }
@@ -89,17 +105,33 @@ final class ProgramStore {
             connectionState = .failed("Falta emparejar Zeuz Agent")
             return
         }
+        guard connectionState != .connecting else { return }
         stopAutoRefresh()
         connectionState = .connecting
         do {
             let agent = ZeuzAgentProgramClient(settings: settings, token: token)
             try await agent.checkConnection()
+            guard !Task.isCancelled else {
+                await agent.disconnect()
+                connectionState = .disconnected
+                return
+            }
             client = agent
             connectionState = .connected
-            await navigate(to: "")
+            guard await navigate(to: "") else { return }
+            guard !Task.isCancelled else {
+                await agent.disconnect()
+                client = nil
+                connectionState = .disconnected
+                return
+            }
             startAutoRefresh()
         } catch {
             client = nil
+            guard !Task.isCancelled else {
+                connectionState = .disconnected
+                return
+            }
             connectionState = .failed(error.localizedDescription)
         }
     }
@@ -115,15 +147,18 @@ final class ProgramStore {
 
     // MARK: - Navegacion
 
-    func navigate(to path: String) async {
-        guard connectionState.isConnected, let client else { return }
+    @discardableResult
+    func navigate(to path: String) async -> Bool {
+        guard connectionState.isConnected, let client else { return false }
         isLoading = true
         defer { isLoading = false }
         do {
             listing = try await client.list(path: path)
-            lastFingerprint = await client.fingerprint(path: path)
+            lastFingerprint = try await client.fingerprint(path: path)
+            return true
         } catch {
-            errorMessage = error.localizedDescription
+            await connectionDidFail(error)
+            return false
         }
     }
 
@@ -131,7 +166,8 @@ final class ProgramStore {
         await navigate(to: SMBPath.parent(of: listing.path))
     }
 
-    func refresh() async {
+    @discardableResult
+    func refresh() async -> Bool {
         await navigate(to: listing.path)
     }
 
@@ -155,10 +191,24 @@ final class ProgramStore {
 
     private func refreshIfChanged() async {
         guard connectionState.isConnected, !isLoading, let client else { return }
-        let current = await client.fingerprint(path: listing.path)
-        // Huella vacia = fallo de red momentaneo; no borramos lo que ya se ve.
-        guard !current.isEmpty, current != lastFingerprint else { return }
-        await navigate(to: listing.path)
+        do {
+            let current = try await client.fingerprint(path: listing.path)
+            // Huella vacia = fallo de red momentaneo; no borramos lo que ya se ve.
+            guard !current.isEmpty, current != lastFingerprint else { return }
+            await navigate(to: listing.path)
+        } catch {
+            await connectionDidFail(error)
+        }
+    }
+
+    /// Conserva el ultimo listado visible, pero marca la sesion como perdida
+    /// para que AppModel pueda volver a crearla en el siguiente intento.
+    private func connectionDidFail(_ error: Error) async {
+        stopAutoRefresh()
+        connectionState = .failed(error.localizedDescription)
+        guard let client else { return }
+        await client.disconnect()
+        self.client = nil
     }
 
     // MARK: - Editor
@@ -197,7 +247,7 @@ final class ProgramStore {
                 content: draft,
                 truncated: document.truncated
             )
-            lastFingerprint = await client.fingerprint(path: listing.path)
+            lastFingerprint = (try? await client.fingerprint(path: listing.path)) ?? ""
             await refresh()
         } catch {
             errorMessage = error.localizedDescription

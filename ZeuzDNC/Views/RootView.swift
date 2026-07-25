@@ -14,13 +14,17 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var showsSettings = false
+    @State private var sendBarHeight: CGFloat = 0
 
     var body: some View {
         @Bindable var model = model
         @Bindable var programs = programs
 
         NavigationStack {
-            ProgramBrowserView(showsSettings: $showsSettings)
+            ProgramBrowserView(
+                showsSettings: $showsSettings,
+                bottomClearance: model.showsEditor ? 0 : sendBarHeight
+            )
                 .navigationDestination(isPresented: $model.showsEditor) {
                     EditorView()
                 }
@@ -28,26 +32,32 @@ struct RootView: View {
         // Dentro del editor la barra se retira: ahi el trabajo es el texto, y
         // maquina/puerto/ENVIAR solo estorban y roban alto de pantalla. Vuelve
         // sola al salir de la edicion.
-        .safeAreaInset(edge: .bottom) {
+        // La barra es una superposicion independiente y no reduce el alto de
+        // la lista. Su altura real se usa como margen al final del scroll.
+        .overlay(alignment: .bottom) {
             if !model.showsEditor {
                 SendBar()
+                    .safeAreaPadding(.bottom, 2)
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { height in
+                        sendBarHeight = height
+                    }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.smooth(duration: 0.28), value: model.showsEditor)
         .task {
-            await model.connectIfPossible()
+            model.startConnectionMonitoring()
         }
         .onChange(of: scenePhase) { _, phase in
             // En segundo plano no tiene sentido seguir sondeando el share:
             // gasta bateria y el sistema puede matar la conexion igualmente.
             switch phase {
             case .active:
-                if programs.connectionState.isConnected {
-                    programs.startAutoRefresh()
-                }
+                model.startConnectionMonitoring()
             case .background, .inactive:
-                programs.stopAutoRefresh()
+                model.stopConnectionMonitoring()
             @unknown default:
                 break
             }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Barra inferior de envio: maquina, puerto y el boton ENVIAR.
+/// Barra inferior compacta: maquina, puerto y el boton ENVIAR en una fila.
 ///
 /// Como en la version de la Pi, enviar es siempre una accion manual y
 /// explicita con confirmacion — la app nunca transmite sola porque apareciera
@@ -17,28 +17,20 @@ struct SendBar: View {
     var body: some View {
         @Bindable var model = model
 
-        return VStack(spacing: 12) {
-            if transfer.state.status != .idle {
-                TransferProgressView(state: transfer.state)
-            }
-
+        return Group {
             if transfer.isSending {
                 sendingControls
+            } else if transfer.state.status != .idle {
+                finishedControls
             } else {
                 selectionControls
             }
-
-            if !model.blockers.isEmpty, !transfer.isSending {
-                Text(model.blockers.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
-        .padding(16)
-        .glassEffect(.regular, in: .rect(cornerRadius: 26))
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .padding(.horizontal, 10)
+        .padding(.bottom, 4)
         .sheet(isPresented: $showsMachinePicker) { MachineListView() }
         .sheet(isPresented: $showsPortPicker) { EndpointListView() }
         .confirmationDialog(
@@ -56,91 +48,134 @@ struct SendBar: View {
     // MARK: - Controles
 
     private var selectionControls: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                chip(
-                    icon: "gearshape.2",
-                    title: machines.selected?.name ?? "Elegir maquina",
-                    subtitle: machines.selected?.summary ?? "sin seleccionar",
-                    isSet: machines.selected != nil
-                ) { showsMachinePicker = true }
+        HStack(spacing: 8) {
+            compactSelector(
+                icon: "gearshape.2",
+                title: machines.selected?.name ?? "Máquina",
+                accessibilityTitle: "Máquina",
+                accessibilityValue: machines.selected?.summary ?? "Sin seleccionar",
+                isSet: machines.selected != nil
+            ) { showsMachinePicker = true }
 
-                chip(
-                    icon: endpoints.selected?.kind.icon ?? "cable.connector",
-                    title: endpoints.selected?.name ?? "Elegir puerto",
-                    subtitle: endpoints.selected?.destination ?? "sin seleccionar",
-                    isSet: endpoints.selected != nil
-                ) { showsPortPicker = true }
-            }
+            compactSelector(
+                icon: endpoints.selected?.kind.icon ?? "cable.connector",
+                title: endpoints.selected?.name ?? "Raspberry",
+                accessibilityTitle: "Puerto o Raspberry",
+                accessibilityValue: endpoints.selected?.destination ?? "Sin seleccionar",
+                isSet: endpoints.selected != nil
+            ) { showsPortPicker = true }
 
             Button {
                 model.showsSendConfirmation = true
             } label: {
-                Label("ENVIAR", systemImage: "paperplane.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                Label("Enviar", systemImage: "paperplane.fill")
+                    .font(.subheadline.weight(.bold))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.glassProminent)
             .tint(model.canSend ? ZeuzPalette.ready : .gray)
             .disabled(!model.canSend)
-
-            if transfer.state.status == .success || transfer.state.status == .error
-                || transfer.state.status == .cancelled {
-                Button("Listo") { model.finishTransfer() }
-                    .buttonStyle(.glass)
-                    .frame(maxWidth: .infinity)
-            }
+            .accessibilityHint(model.blockers.joined(separator: ". "))
         }
     }
 
     private var sendingControls: some View {
-        Button(role: .destructive) {
-            transfer.cancel()
-        } label: {
-            Label("CANCELAR ENVIO", systemImage: "stop.fill")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(transfer.state.status.label)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if transfer.state.totalBytes > 0 {
+                        Text("\(transfer.state.percent)%")
+                            .font(.caption.weight(.bold).monospacedDigit())
+                            .foregroundStyle(ZeuzPalette.active)
+                    }
+                }
+                ProgressView(value: transfer.state.fraction)
+                    .tint(ZeuzPalette.active)
+            }
+
+            Button(role: .destructive) {
+                transfer.cancel()
+            } label: {
+                Label("Cancelar", systemImage: "stop.fill")
+                    .font(.subheadline.weight(.bold))
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(ZeuzPalette.danger)
         }
-        .buttonStyle(.glassProminent)
-        .tint(ZeuzPalette.danger)
     }
 
-    private func chip(
+    private var finishedControls: some View {
+        HStack(spacing: 10) {
+            Image(systemName: finishedIcon)
+                .foregroundStyle(finishedColor)
+            Text(transfer.state.status.label)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button("Listo") { model.finishTransfer() }
+                .buttonStyle(.glassProminent)
+                .tint(finishedColor)
+        }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func compactSelector(
         icon: String,
         title: String,
-        subtitle: String,
+        accessibilityTitle: String,
+        accessibilityValue: String,
         isSet: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.subheadline)
                     .foregroundStyle(isSet ? ZeuzPalette.accent : .secondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 44)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .glassEffect(
             isSet ? .regular.tint(ZeuzPalette.accent.opacity(0.15)) : .regular,
-            in: .rect(cornerRadius: 16)
+            in: .rect(cornerRadius: 14)
         )
+        .accessibilityLabel(accessibilityTitle)
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var finishedColor: Color {
+        switch transfer.state.status {
+        case .success: ZeuzPalette.ready
+        case .error: ZeuzPalette.danger
+        case .cancelled: ZeuzPalette.warning
+        default: .secondary
+        }
+    }
+
+    private var finishedIcon: String {
+        switch transfer.state.status {
+        case .success: "checkmark.circle.fill"
+        case .error: "exclamationmark.triangle.fill"
+        case .cancelled: "xmark.circle.fill"
+        default: "info.circle.fill"
+        }
     }
 
     // MARK: - Confirmacion

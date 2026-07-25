@@ -9,10 +9,20 @@ import AMSMB2
 actor SMBClient: ProgramClient {
     private var manager: SMB2Manager?
     private var settings: SMBSettings?
+    private var descriptorCache: [String: DescriptorCacheEntry] = [:]
 
     /// Tope de lectura para el editor. Un programa de mas de 2 MB se abre en
     /// solo lectura: es casi seguro un volcado, no algo que se edite a mano.
     static let maxPreviewBytes = 2 * 1024 * 1024
+    /// El numero O y su descripcion viven al principio de los programas. Solo
+    /// traemos este encabezado para no descargar cada archivo al mostrar la lista.
+    static let maxHeaderBytes: UInt64 = 4 * 1024
+
+    private struct DescriptorCacheEntry {
+        var size: Int64
+        var modified: Date?
+        var descriptor: String?
+    }
 
     var isConnected: Bool { manager != nil }
 
@@ -60,6 +70,7 @@ actor SMBClient: ProgramClient {
     private func disconnectLocal() {
         manager = nil
         settings = nil
+        descriptorCache.removeAll()
     }
 
     // MARK: - Navegacion
@@ -85,13 +96,16 @@ actor SMBClient: ProgramClient {
             if ProgramEntry.isIgnored(name) { continue }
 
             let isDirectory = (item[.fileResourceTypeKey] as? URLFileResourceType) == .directory
-            let entry = ProgramEntry(
+            var entry = ProgramEntry(
                 name: name,
                 path: join(path, name),
                 isDirectory: isDirectory,
                 size: (item[.fileSizeKey] as? NSNumber)?.int64Value ?? 0,
                 modified: item[.contentModificationDateKey] as? Date
             )
+            if !isDirectory {
+                entry.programDescriptor = await descriptor(for: entry, manager: manager)
+            }
             if isDirectory { directories.append(entry) } else { files.append(entry) }
         }
 
@@ -124,13 +138,15 @@ actor SMBClient: ProgramClient {
             guard (item[.fileResourceTypeKey] as? URLFileResourceType) != .directory else { continue }
 
             let fullPath = (item[.pathKey] as? String) ?? name
-            results.append(ProgramEntry(
+            var entry = ProgramEntry(
                 name: name,
                 path: relative(fullPath),
                 isDirectory: false,
                 size: (item[.fileSizeKey] as? NSNumber)?.int64Value ?? 0,
                 modified: item[.contentModificationDateKey] as? Date
-            ))
+            )
+            entry.programDescriptor = await descriptor(for: entry, manager: manager)
+            results.append(entry)
             if results.count >= limit { break }
         }
         results.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -185,6 +201,7 @@ actor SMBClient: ProgramClient {
             } else {
                 try await manager.write(data: data, toPath: full, progress: nil)
             }
+            descriptorCache.removeValue(forKey: path)
         } catch {
             throw SMBError.writeFailed(path, error.localizedDescription)
         }
@@ -206,6 +223,7 @@ actor SMBClient: ProgramClient {
         let manager = try requireManager()
         do {
             try await manager.removeFile(atPath: absolute(path))
+            descriptorCache.removeValue(forKey: path)
         } catch {
             throw SMBError.deleteFailed(path, error.localizedDescription)
         }
@@ -232,12 +250,43 @@ actor SMBClient: ProgramClient {
 
     /// Huella barata del contenido de una carpeta, para detectar cambios sin
     /// traerse los archivos. Reemplaza al contador de version del watchdog.
-    func fingerprint(path: String) async -> String {
-        guard let listing = try? await list(path: path) else { return "" }
+    func fingerprint(path: String) async throws -> String {
+        let listing = try await list(path: path)
         let parts = (listing.directories + listing.files).map {
             "\($0.name):\($0.size):\($0.modified?.timeIntervalSince1970 ?? 0)"
         }
         return parts.joined(separator: "|")
+    }
+
+    /// Lee y memoriza solo el encabezado. La fecha y el tamano invalidan la
+    /// cache cuando otro equipo modifica el programa en la carpeta compartida.
+    private func descriptor(for entry: ProgramEntry, manager: SMB2Manager) async -> String? {
+        if let cached = descriptorCache[entry.path],
+           cached.size == entry.size,
+           cached.modified == entry.modified {
+            return cached.descriptor
+        }
+
+        let descriptor: String?
+        do {
+            let data = try await manager.contents(
+                atPath: absolute(entry.path),
+                range: UInt64(0)..<Self.maxHeaderBytes
+            )
+            let header = String(data: data, encoding: .isoLatin1) ?? ""
+            descriptor = ProgramEntry.descriptor(in: header)
+        } catch {
+            // El nombre, peso y fecha siguen siendo utiles aunque un archivo
+            // concreto no permita leer su encabezado.
+            descriptor = nil
+        }
+
+        descriptorCache[entry.path] = DescriptorCacheEntry(
+            size: entry.size,
+            modified: entry.modified,
+            descriptor: descriptor
+        )
+        return descriptor
     }
 
     // MARK: - Rutas
