@@ -13,6 +13,7 @@ struct ZeuzDNCApp: App {
                 .environment(model.endpoints)
                 .environment(model.transfer)
                 .environment(model.smbSettings)
+                .environment(model.agentSettings)
         }
     }
 }
@@ -27,9 +28,12 @@ final class AppModel {
     let endpoints = EndpointStore()
     let transfer = TransferController()
     let smbSettings = SMBSettingsStore()
+    let agentSettings = ZeuzAgentSettingsStore()
 
     /// Se muestra la hoja de ajustes al abrir si todavia no hay share.
-    var showsOnboarding: Bool { !smbSettings.settings.isConfigured }
+    var showsOnboarding: Bool {
+        !agentSettings.isReady && !smbSettings.settings.isConfigured
+    }
 
     /// El editor esta abierto encima de la lista.
     var showsEditor = false
@@ -43,7 +47,7 @@ final class AppModel {
     var blockers: [String] {
         var reasons: [String] = []
         if !programs.connectionState.isConnected {
-            reasons.append("Conecta la carpeta compartida")
+            reasons.append("Conecta Zeuz Agent")
         }
         if programs.document == nil {
             reasons.append("Elige un programa")
@@ -90,11 +94,19 @@ final class AppModel {
     }
 
     func connectIfPossible() async {
-        guard smbSettings.settings.isConfigured else { return }
-        await programs.connect(
-            settings: smbSettings.settings,
-            password: smbSettings.password
-        )
+        if agentSettings.isReady {
+            await programs.connect(
+                agent: agentSettings.settings,
+                token: agentSettings.token
+            )
+        } else if smbSettings.settings.isConfigured {
+            await programs.connect(
+                settings: smbSettings.settings,
+                password: smbSettings.password
+            )
+        } else {
+            return
+        }
         // Al arrancar, dejamos los perfiles iguales a los de la Pi sin que haya
         // que acordarse de sincronizar a mano. Si la Pi no responde, se ignora:
         // no es motivo para bloquear la app.

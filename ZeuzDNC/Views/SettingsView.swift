@@ -5,12 +5,17 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ProgramStore.self) private var programs
     @Environment(SMBSettingsStore.self) private var smb
+    @Environment(ZeuzAgentSettingsStore.self) private var agent
     @Environment(MachineStore.self) private var machines
     @Environment(EndpointStore.self) private var endpoints
     @Environment(\.dismiss) private var dismiss
 
     @State private var draft = SMBSettings()
     @State private var password = ""
+    @State private var agentURL = ""
+    @State private var pairingCode = ""
+    @State private var pairingError = ""
+    @State private var isPairing = false
     @State private var isTesting = false
     @State private var showsMachines = false
     @State private var showsEndpoints = false
@@ -19,6 +24,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 connectionStatusSection
+                agentSection
                 shareSection
                 credentialsSection
                 catalogSection
@@ -31,7 +37,7 @@ struct SettingsView: View {
                     Button("Cerrar") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Guardar y conectar") { saveAndConnect() }
+                    Button("Guardar SMB") { saveAndConnect() }
                         .fontWeight(.semibold)
                         .disabled(!draft.isConfigured || isTesting)
                 }
@@ -41,6 +47,7 @@ struct SettingsView: View {
             .onAppear {
                 draft = smb.settings
                 password = smb.password
+                agentURL = agent.settings.normalizedURL
             }
         }
     }
@@ -51,7 +58,12 @@ struct SettingsView: View {
         Section {
             switch programs.connectionState {
             case .connected:
-                StatusPill(level: .ready, text: "Conectado a \(smb.settings.displayPath)")
+                StatusPill(
+                    level: .ready,
+                    text: agent.isReady
+                        ? "Conectado a \(agent.settings.displayName)"
+                        : "Conectado a \(smb.settings.displayPath)"
+                )
             case .connecting:
                 StatusPill(level: .neutral, text: "Conectando…")
             case .failed(let message):
@@ -66,6 +78,57 @@ struct SettingsView: View {
             }
         }
         .listRowBackground(Color.clear)
+    }
+
+    private var agentSection: some View {
+        Section {
+            TextField("http://zeuz-agent.local:47820", text: $agentURL)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            TextField("Codigo de 6 digitos", text: $pairingCode)
+                .keyboardType(.numberPad)
+
+            if !pairingError.isEmpty {
+                Text(pairingError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            Button {
+                pairAgent()
+            } label: {
+                if isPairing {
+                    ProgressView()
+                } else {
+                    Label(
+                        agent.isReady ? "Volver a emparejar" : "Emparejar y conectar",
+                        systemImage: "link"
+                    )
+                }
+            }
+            .disabled(
+                agentURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || pairingCode.filter(\.isNumber).count != 6
+                    || isPairing
+            )
+
+            if agent.isReady {
+                Button("Olvidar Zeuz Agent", role: .destructive) {
+                    agent.forget()
+                    pairingCode = ""
+                    Task { await model.reconnect() }
+                }
+            }
+        } header: {
+            Text("Zeuz Agent (recomendado)")
+        } footer: {
+            Text(
+                "Instala Zeuz Agent en la PC o Mac donde guardas los programas. "
+                    + "No requiere configurar SMB, usuarios ni carpetas compartidas."
+            )
+        }
     }
 
     private var shareSection: some View {
@@ -83,7 +146,7 @@ struct SettingsView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         } header: {
-            Text("Carpeta compartida")
+            Text("SMB legado")
         } footer: {
             Text(
                 "La misma carpeta que ves desde Windows o Mac. Al guardar un programa ahi, "
@@ -165,6 +228,33 @@ struct SettingsView: View {
             if programs.connectionState.isConnected {
                 dismiss()
             }
+        }
+    }
+
+    private func pairAgent() {
+        isPairing = true
+        pairingError = ""
+        let normalized = ZeuzAgentSettings(baseURL: agentURL).normalizedURL
+        let code = pairingCode.filter(\.isNumber)
+        Task {
+            do {
+                let result = try await ZeuzAgentProgramClient.pair(
+                    baseURL: normalized,
+                    code: code
+                )
+                agent.settings = ZeuzAgentSettings(
+                    baseURL: normalized,
+                    agentName: result.agentName
+                )
+                agent.token = result.token
+                await model.reconnect()
+                if programs.connectionState.isConnected {
+                    dismiss()
+                }
+            } catch {
+                pairingError = error.localizedDescription
+            }
+            isPairing = false
         }
     }
 }

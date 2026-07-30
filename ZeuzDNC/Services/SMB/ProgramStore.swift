@@ -27,7 +27,7 @@ final class ProgramStore {
 
     var errorMessage: String?
 
-    private let client = SMBClient()
+    private var client: (any ProgramClient)?
     private var refreshTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     private var lastFingerprint = ""
@@ -72,18 +72,42 @@ final class ProgramStore {
         stopAutoRefresh()
         connectionState = .connecting
         do {
-            try await client.connect(settings: settings, password: password)
+            let smb = SMBClient()
+            try await smb.connect(settings: settings, password: password)
+            client = smb
             connectionState = .connected
             await navigate(to: "")
             startAutoRefresh()
         } catch {
+            client = nil
+            connectionState = .failed(error.localizedDescription)
+        }
+    }
+
+    func connect(agent settings: ZeuzAgentSettings, token: String) async {
+        guard settings.isConfigured, !token.isEmpty else {
+            connectionState = .failed("Falta emparejar Zeuz Agent")
+            return
+        }
+        stopAutoRefresh()
+        connectionState = .connecting
+        do {
+            let agent = ZeuzAgentProgramClient(settings: settings, token: token)
+            try await agent.checkConnection()
+            client = agent
+            connectionState = .connected
+            await navigate(to: "")
+            startAutoRefresh()
+        } catch {
+            client = nil
             connectionState = .failed(error.localizedDescription)
         }
     }
 
     func disconnect() async {
         stopAutoRefresh()
-        await client.disconnect()
+        if let client { await client.disconnect() }
+        client = nil
         connectionState = .disconnected
         listing = .empty
         closeDocument()
@@ -92,7 +116,7 @@ final class ProgramStore {
     // MARK: - Navegacion
 
     func navigate(to path: String) async {
-        guard connectionState.isConnected else { return }
+        guard connectionState.isConnected, let client else { return }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -130,7 +154,7 @@ final class ProgramStore {
     }
 
     private func refreshIfChanged() async {
-        guard connectionState.isConnected, !isLoading else { return }
+        guard connectionState.isConnected, !isLoading, let client else { return }
         let current = await client.fingerprint(path: listing.path)
         // Huella vacia = fallo de red momentaneo; no borramos lo que ya se ve.
         guard !current.isEmpty, current != lastFingerprint else { return }
@@ -140,6 +164,7 @@ final class ProgramStore {
     // MARK: - Editor
 
     func open(_ entry: ProgramEntry) async {
+        guard let client else { return }
         guard !entry.isDirectory else {
             await navigate(to: entry.path)
             return
@@ -161,7 +186,7 @@ final class ProgramStore {
     }
 
     func save() async {
-        guard let document, hasUnsavedChanges else { return }
+        guard let document, hasUnsavedChanges, let client else { return }
         isSaving = true
         defer { isSaving = false }
         do {
@@ -180,6 +205,7 @@ final class ProgramStore {
     }
 
     func createProgram(named name: String) async {
+        guard let client else { return }
         do {
             let path = try await client.createFile(directory: listing.path, name: name)
             await refresh()
@@ -196,6 +222,7 @@ final class ProgramStore {
     }
 
     func createFolder(named name: String) async {
+        guard let client else { return }
         do {
             _ = try await client.createDirectory(parent: listing.path, name: name)
             await refresh()
@@ -205,6 +232,7 @@ final class ProgramStore {
     }
 
     func delete(_ entry: ProgramEntry) async {
+        guard let client else { return }
         do {
             try await client.delete(path: entry.path)
             if document?.path == entry.path { closeDocument() }
@@ -228,10 +256,11 @@ final class ProgramStore {
             // Pequena espera para no lanzar una busqueda por cada tecla.
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled, let self else { return }
+            guard let client = self.client else { return }
             self.isSearching = true
             defer { self.isSearching = false }
             do {
-                let results = try await self.client.search(query: query)
+                let results = try await client.search(query: query, limit: 300)
                 guard !Task.isCancelled else { return }
                 self.searchResults = results
             } catch {

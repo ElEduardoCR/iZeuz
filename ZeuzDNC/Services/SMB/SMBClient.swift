@@ -6,7 +6,7 @@ import AMSMB2
 /// Es el equivalente de `folder_monitor.py` de la Raspberry Pi: navegar
 /// subcarpetas, leer, guardar, crear, borrar y buscar — pero hablando SMB
 /// directo desde el iPhone en vez de leer un disco local.
-actor SMBClient {
+actor SMBClient: ProgramClient {
     private var manager: SMB2Manager?
     private var settings: SMBSettings?
 

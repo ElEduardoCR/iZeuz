@@ -35,8 +35,8 @@ elegir otro puerto en la interfaz.
 
 - Xcode 26 o superior, SDK de iOS 26
 - iPhone o iPad con iOS 26
-- Una carpeta compartida por SMB en la red (la misma que ya usas desde
-  Windows o Mac)
+- Zeuz Agent en la PC o Mac donde guardas los programas (recomendado), o una
+  carpeta compartida por SMB como alternativa
 - Un puente serial **o** un cable Redpark (ver abajo)
 
 ---
@@ -57,7 +57,25 @@ y cambia el bundle id si `com.zeuz.dnc` ya esta tomado.
 > problema. Si algun dia publicas en el App Store, tiene que ir enlazada
 > dinamicamente (Embed & Sign, que es el default de SPM).
 
-### 2. Configurar la carpeta compartida
+### 2. Conectar con Zeuz Agent (recomendado)
+
+1. Abre Zeuz Agent en la PC o Mac y confirma que ambos equipos están en la
+   misma red.
+2. En el iPhone entra a **Ajustes → Zeuz Agent**.
+3. Escribe la dirección que muestra el Agent, por ejemplo
+   `http://192.168.1.10:47820`, y su código temporal de seis dígitos.
+4. Pulsa **Emparejar y conectar**.
+
+El token queda protegido en el llavero de iOS. Después del emparejamiento, el
+iPhone y la Raspberry pueden abrir y editar la misma biblioteca del Agent sin
+crear usuarios SMB.
+
+> En esta primera versión, Zeuz Agent comparte y sincroniza los programas. El
+> envío físico por RS232 todavía se inicia desde la Raspberry. El antiguo
+> puente HTTP del puerto 5000 sigue documentado abajo sólo para instalaciones
+> que continúen usando el servidor Flask anterior.
+
+### 2B. Configurar una carpeta SMB (alternativa)
 
 En la app: **⚙︎ Ajustes → Carpeta compartida**
 
@@ -352,3 +370,19 @@ TX/RX para tu control.
 la cadena de protocolo del puerto coincida con la de `ZeuzDNC-Info.plist`.
 En **Puertos** se listan los cables que iOS detecta ahora mismo, con sus
 protocolos reales — es la forma rapida de saber cual poner.
+# Zeuz Agent (migración actual)
+
+La app ya incluye el cliente del protocolo HTTP v1 de Zeuz Agent. En
+**Ajustes → Zeuz Agent** se captura la dirección del agente y el código de
+seis dígitos; el token resultante se guarda en el llavero de iOS.
+
+`ProgramStore` usa ahora una fuente intercambiable. Zeuz Agent es la opción
+preferida y SMB se conserva como compatibilidad durante la transición. La
+interfaz, el editor y el flujo de envío no dependen de cuál fuente entregó el
+programa.
+
+El servicio Bonjour permitido por la app es `_zeuz-agent._tcp`. La selección
+automática de un agente descubierto se agregará en el siguiente incremento;
+por ahora puede escribirse su IP o nombre `.local`.
+
+---
