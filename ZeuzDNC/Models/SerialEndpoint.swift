@@ -58,6 +58,26 @@ struct SerialEndpoint: Identifiable, Codable, Hashable, Sendable {
 }
 
 extension SerialEndpoint {
+    /// Nombre estable publicado por cada Zeuz mediante Bonjour. La IP que
+    /// entrega el router puede cambiar entre reinicios, pero el hostname del
+    /// equipo se conserva (por ejemplo `zeuz-dnc-1b3b992.local`).
+    var connectionHost: String {
+        guard kind == .zeuzBridge else { return host }
+        return Self.zeuzServiceHost(deviceName: name, fallback: host)
+    }
+
+    static func zeuzServiceHost(deviceName: String, fallback: String) -> String {
+        let candidate = deviceName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let bare = candidate.hasSuffix(".local")
+            ? String(candidate.dropLast(".local".count))
+            : candidate
+        let isZeuzHostname = (bare == "zeuz" || bare.hasPrefix("zeuz-dnc-"))
+            && bare.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" }
+        return isZeuzHostname ? "\(bare).local" : fallback
+    }
+
     enum Kind: String, Codable, CaseIterable, Hashable, Sendable {
         /// Le delega el envio al ZeuzDNC que ya corre en la Raspberry Pi: el
         /// iPhone manda la orden por HTTP y la Pi saca el G-code por su propio
@@ -73,10 +93,10 @@ extension SerialEndpoint {
 
         var label: String {
             switch self {
-            case .zeuzBridge: "Puente ZeuzDNC (Raspberry Pi)"
-            case .networkBridge: "Puente en red (WiFi)"
-            case .mfiCable: "Cable MFi (Redpark)"
-            case .simulator: "Simulador (sin hardware)"
+            case .zeuzBridge: L10n.text("Dispositivo ZeuzDNC")
+            case .networkBridge: L10n.text("Puente en red (WiFi)")
+            case .mfiCable: L10n.text("Cable MFi (Redpark)")
+            case .simulator: L10n.text("Simulador (sin hardware)")
             }
         }
 
@@ -108,15 +128,16 @@ extension SerialEndpoint {
     var destination: String {
         switch kind {
         case .zeuzBridge:
-            let base = host.isEmpty ? "sin IP" : "\(host):\(port)"
+            let base = L10n.text("Vía Zeuz Agent")
             return bridgePort.isEmpty ? base : "\(base) → \(bridgePort)"
         case .networkBridge:
-            let base = host.isEmpty ? "sin host" : "\(host):\(port)"
+            let base = host.isEmpty ? L10n.text("sin host") : "\(host):\(port)"
             return bridgePort.isEmpty ? base : "\(base) → \(bridgePort)"
         case .mfiCable:
-            return accessorySerialNumber.map { "cable · \($0)" } ?? "cable conectado"
+            return accessorySerialNumber.map { L10n.format("cable · %@", $0) }
+                ?? L10n.text("cable conectado")
         case .simulator:
-            return "sin hardware"
+            return L10n.text("sin hardware")
         }
     }
 }
@@ -130,10 +151,10 @@ enum EndpointValidationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .emptyName: "El nombre del puerto es obligatorio"
-        case .emptyHost: "Escribe la direccion IP o el nombre del puente"
-        case .invalidPort: "El puerto TCP debe estar entre 1 y 65535"
-        case .emptyProtocol: "Falta la cadena de protocolo MFi del cable"
+        case .emptyName: L10n.text("El nombre del puerto es obligatorio")
+        case .emptyHost: L10n.text("Escribe la direccion IP o el nombre del puente")
+        case .invalidPort: L10n.text("El puerto TCP debe estar entre 1 y 65535")
+        case .emptyProtocol: L10n.text("Falta la cadena de protocolo MFi del cable")
         }
     }
 }
@@ -145,7 +166,12 @@ extension SerialEndpoint {
         guard !copy.name.isEmpty else { throw EndpointValidationError.emptyName }
 
         switch kind {
-        case .zeuzBridge, .networkBridge:
+        case .zeuzBridge:
+            // ZeuzAgent localiza ZeuzDNC por Bonjour; el iPhone no necesita
+            // conocer ni validar la IP del dispositivo.
+            copy.host = ""
+            copy.port = Kind.zeuzBridge.defaultPort
+        case .networkBridge:
             copy.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !copy.host.isEmpty else { throw EndpointValidationError.emptyHost }
             guard (1...65535).contains(port) else { throw EndpointValidationError.invalidPort }

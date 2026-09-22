@@ -48,7 +48,7 @@ struct DirectoryListing: Sendable {
 
     static let empty = DirectoryListing(
         path: "",
-        breadcrumb: [Breadcrumb(name: "Programas", path: "")],
+        breadcrumb: [Breadcrumb(name: L10n.text("Programas"), path: "")],
         directories: [],
         files: []
     )

@@ -48,6 +48,8 @@ final class ZeuzAgentSettingsStore {
     }
 
     func forget() {
+        UserDefaults.standard.removeObject(forKey: "zeuz.workshop.fallback:" + settings.normalizedURL)
+        UserDefaults.standard.removeObject(forKey: "zeuz.workshop.active:" + settings.normalizedURL)
         Keychain.delete(account: settings.keychainAccount)
         settings = ZeuzAgentSettings()
     }

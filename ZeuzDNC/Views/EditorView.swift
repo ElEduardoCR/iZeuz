@@ -29,7 +29,7 @@ struct EditorView: View {
                 editor
             }
         }
-        .navigationTitle(programs.document?.name ?? "Editor")
+        .navigationTitle(programs.document?.name ?? L10n.text("Editor"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .sheet(isPresented: $showsLegend) { GCodeLegendView() }

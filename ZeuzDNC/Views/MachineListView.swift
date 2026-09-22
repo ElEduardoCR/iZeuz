@@ -1,16 +1,14 @@
 import SwiftUI
 
-/// Lista de maquinas: seleccionar, editar, eliminar y dar de alta nuevas.
-/// Todo desde la app, sin tocar archivos de configuracion.
+/// Selección y edición de perfiles compartidos con Agent y la pantalla táctil.
 struct MachineListView: View {
     @Environment(AppModel.self) private var model
     @Environment(MachineStore.self) private var machines
     @Environment(\.dismiss) private var dismiss
 
-    @State private var editing: Machine?
-    @State private var isCreating = false
     @State private var isSyncing = false
     @State private var syncError: String?
+    @State private var editingMachine: Machine?
 
     var body: some View {
         NavigationStack {
@@ -19,17 +17,10 @@ struct MachineListView: View {
                     ForEach(machines.machines) { machine in
                         row(machine)
                     }
-                    .onDelete { machines.delete(at: $0) }
                 } header: {
                     Text("Maquinas dadas de alta")
                 } footer: {
-                    Text(
-                        machines.piBackedIDs.isEmpty
-                            ? "Los perfiles de fabrica son valores tipicos de referencia. Sincroniza con "
-                                + "la Raspberry Pi para traer los perfiles reales de tus maquinas."
-                            : "Las marcadas con PI vienen de la Raspberry Pi y son las que ella usa al "
-                                + "enviar. Editarlas aqui tambien las cambia alla: una sola configuracion."
-                    )
+                    Text("Edita los parámetros seriales aquí o en Zeuz Agent y la pantalla táctil. Los cambios se sincronizan cuando los equipos están conectados.")
                 }
             }
             .navigationTitle("Maquinas")
@@ -40,9 +31,11 @@ struct MachineListView: View {
                     EmptyStateView(
                         icon: "gearshape.2",
                         title: "Sin maquinas",
-                        message: "Da de alta la primera maquina con su configuracion serial.",
-                        actionTitle: "Agregar maquina",
-                        action: { isCreating = true }
+                        message: machines.lastSync == nil
+                            ? "Conecta Zeuz Agent y actualiza la lista."
+                            : "Agrega la primera máquina desde Zeuz Agent y vuelve a actualizar.",
+                        actionTitle: "Actualizar desde Zeuz Agent",
+                        action: { Task { await sync() } }
                     )
                 }
             }
@@ -50,19 +43,15 @@ struct MachineListView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Listo") { dismiss() }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        isCreating = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
+            }
+            .sheet(item: $editingMachine) { MachineEditorView(machine: $0) }
+            .task {
+                await sync()
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(5))
+                    if Task.isCancelled { break }
+                    await model.checkMachineSynchronization()
                 }
-            }
-            .sheet(item: $editing) { machine in
-                MachineEditorView(machine: machine)
-            }
-            .sheet(isPresented: $isCreating) {
-                MachineEditorView(machine: nil)
             }
             .alert("No se pudo sincronizar", isPresented: Binding(
                 get: { syncError != nil },
@@ -88,7 +77,7 @@ struct MachineListView: View {
                     } else {
                         Image(systemName: "arrow.triangle.2.circlepath")
                     }
-                    Text(isSyncing ? "Sincronizando…" : "Sincronizar con la Raspberry Pi")
+                    Text(isSyncing ? L10n.text("Actualizando…") : "Actualizar desde Zeuz Agent")
                         .font(.subheadline.weight(.semibold))
                 }
                 .frame(maxWidth: .infinity)
@@ -108,15 +97,18 @@ struct MachineListView: View {
 
     private var syncStatus: String {
         guard let last = machines.lastSync else {
-            return "La Pi manda: al enviar por el puente usa SU configuracion, no la del telefono."
+            return L10n.text("iZeuz mostrará las máquinas configuradas en Zeuz Agent.")
         }
-        return "Ultima sincronizacion: \(last.formatted(date: .omitted, time: .shortened))"
+        return L10n.format(
+            "Ultima sincronizacion: %@",
+            last.formatted(date: .omitted, time: .shortened)
+        )
     }
 
     private func sync() async {
         isSyncing = true
         defer { isSyncing = false }
-        syncError = await model.syncMachinesFromPi()
+        syncError = await model.syncMachinesFromZeuzDNC()
     }
 
     private func row(_ machine: Machine) -> some View {
@@ -136,8 +128,8 @@ struct MachineListView: View {
                             Text(machine.name)
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(.primary)
-                            if machines.isPiBacked(machine) {
-                                Text("PI")
+                            if machines.isZeuzBacked(machine) {
+                                Text("ZEUZ")
                                     .font(.caption2.weight(.bold))
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
@@ -162,14 +154,14 @@ struct MachineListView: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-
-            Button {
-                editing = machine
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .foregroundStyle(ZeuzPalette.accent)
+            Button("Editar", systemImage: "slider.horizontal.3") {
+                editingMachine = machine
             }
-            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel("Editar \(machine.name)")
+            .buttonStyle(.borderless)
+            .disabled(!machines.isZeuzBacked(machine))
         }
     }
 }
@@ -186,11 +178,7 @@ struct MachineEditorView: View {
     @State private var draft: Machine
     @State private var errorMessage: String?
     @State private var isSaving = false
-
-    /// La maquina vive en la Pi: al guardar hay que cambiarla alla tambien.
-    private var isPiBacked: Bool {
-        machine.map { machines.isPiBacked($0) } ?? false
-    }
+    @State private var confirmsDelete = false
 
     init(machine: Machine?) {
         self.machine = machine
@@ -256,7 +244,7 @@ struct MachineEditorView: View {
                 } header: {
                     Text("Fin de linea")
                 } footer: {
-                    Text("Se aplica al enviar. El archivo en la carpeta compartida no se modifica.")
+                    Text("Se aplica al enviar. El archivo del programa no se modifica.")
                 }
 
                 Section {
@@ -266,33 +254,36 @@ struct MachineEditorView: View {
                 } header: {
                     Text("Lineas de control")
                 } footer: {
-                    Text(
+                    Text(L10n.text(
                         draft.flowControl == .rtsCts
                             ? "Con RTS/CTS la linea RTS la maneja el control de flujo."
-                            : "Muchas configuraciones de PC que funcionan tienen DTR y RTS apagados. "
-                                + "Si la maquina no acepta datos, prueba a cambiarlos."
-                    )
+                            : "Muchas configuraciones de PC que funcionan tienen DTR y RTS apagados. Si la maquina no acepta datos, prueba a cambiarlos."
+                    ))
                 }
 
                 Section {
                     Toggle("Modo goteo (drip-feed)", isOn: $draft.dripFeed)
                 } footer: {
-                    Text(
-                        "La maquina ejecuta mientras recibe y frena el envio con el control de flujo. "
-                            + "Sin limite de tiempo: solo se detiene con CANCELAR."
-                    )
+                    Text(L10n.text(
+                        "La maquina ejecuta mientras recibe y frena el envio con el control de flujo. Sin limite de tiempo: solo se detiene con CANCELAR."
+                    ))
                 }
 
                 if !isNew {
                     Section {
                         Button("Eliminar maquina", role: .destructive) {
-                            if let machine { machines.delete(machine) }
-                            dismiss()
+                            confirmsDelete = true
                         }
+                        .disabled(isSaving)
                     }
                 }
             }
-            .navigationTitle(isNew ? "Nueva maquina" : draft.name)
+            .interactiveDismissDisabled(isSaving)
+            .confirmationDialog("¿Eliminar esta máquina de los equipos sincronizados?", isPresented: $confirmsDelete, titleVisibility: .visible) {
+                Button("Eliminar máquina", role: .destructive) { Task { await delete() } }
+                Button("Cancelar", role: .cancel) {}
+            }
+            .navigationTitle(isNew ? L10n.text("Nueva maquina") : draft.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -318,22 +309,36 @@ struct MachineEditorView: View {
         }
     }
 
-    /// Guarda el perfil. Si la maquina es de la Pi, el cambio va **primero a la
-    /// Pi** y solo se guarda local si alla se acepto: asi nunca queda un valor
-    /// en el telefono que la Pi no tenga (que es justo lo que descuadraba todo).
     private func save() async {
         isSaving = true
         defer { isSaving = false }
         do {
-            let saved: Machine
-            if isPiBacked, let client = model.bridgeClient {
-                saved = try await machines.saveToPi(draft, using: client)
-            } else {
-                saved = try machines.save(draft)
+            guard let client = model.dncClient else {
+                throw ZeuzAgentError.unreachable(
+                    L10n.text("Conecta Zeuz Agent antes de modificar las máquinas.")
+                )
             }
+            let saved = try await machines.saveToZeuzDNC(draft, using: client)
             // Al dar de alta una maquina nueva, lo mas probable es que sea la
             // que se va a usar: la dejamos seleccionada.
             if isNew { machines.select(saved) }
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func delete() async {
+        guard let machine else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            guard let client = model.dncClient else {
+                throw ZeuzAgentError.unreachable(
+                    L10n.text("Conecta Zeuz Agent antes de modificar las máquinas.")
+                )
+            }
+            try await machines.deleteFromZeuzDNC(machine, using: client)
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

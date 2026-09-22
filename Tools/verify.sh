@@ -19,6 +19,7 @@ PORT_FLOW=9972
 echo "==> Compilando el banco de pruebas"
 cp "$ROOT/Tools/TransportTests.swift" "$WORK/main.swift"
 swiftc -swift-version 6 -O -o "$WORK/harness" \
+  "$ROOT/ZeuzDNC/Localization.swift" \
   "$ROOT/ZeuzDNC/Models/Machine.swift" \
   "$ROOT/ZeuzDNC/Models/SerialEndpoint.swift" \
   "$ROOT/ZeuzDNC/Models/ProgramEntry.swift" \
@@ -30,6 +31,7 @@ swiftc -swift-version 6 -O -o "$WORK/harness" \
   "$ROOT/ZeuzDNC/Services/Transport/MFiSerialTransport.swift" \
   "$ROOT/ZeuzDNC/Services/Transport/TransportFactory.swift" \
   "$ROOT/ZeuzDNC/Services/Transport/ZeuzBridgeClient.swift" \
+  "$ROOT/ZeuzDNC/Services/Stores/WorkshopStatusStore.swift" \
   "$ROOT/ZeuzDNC/Services/Transport/ZeuzBridgeSender.swift" \
   "$ROOT/ZeuzDNC/Services/GCodeSender.swift" \
   "$WORK/main.swift"

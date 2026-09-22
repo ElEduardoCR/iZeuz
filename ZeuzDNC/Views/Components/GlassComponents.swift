@@ -44,7 +44,7 @@ struct StatusPill: View {
                     .fill(level.color)
                     .frame(width: 9, height: 9)
             }
-            Text(text)
+            Text(L10n.text(text))
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
         }
@@ -94,10 +94,10 @@ struct SelectableRow: View {
                     .foregroundStyle(isSelected ? tint : .secondary)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
+                    Text(L10n.text(title))
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.primary)
-                    Text(subtitle)
+                    Text(L10n.text(subtitle))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -138,15 +138,15 @@ struct EmptyStateView: View {
                 .font(.system(size: 46))
                 .foregroundStyle(.tertiary)
             VStack(spacing: 6) {
-                Text(title)
+                Text(L10n.text(title))
                     .font(.headline)
-                Text(message)
+                Text(L10n.text(message))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             if let actionTitle, let action {
-                Button(actionTitle, action: action)
+                Button(L10n.text(actionTitle), action: action)
                     .buttonStyle(.glassProminent)
             }
         }
@@ -239,10 +239,10 @@ struct FieldLabel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(text)
+            Text(L10n.text(text))
                 .font(.subheadline.weight(.medium))
             if let help {
-                Text(help)
+                Text(L10n.text(help))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

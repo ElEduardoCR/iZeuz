@@ -91,7 +91,10 @@ final class MFiSerialTransport: NSObject, SerialTransport {
         session.inputStream?.schedule(in: .main, forMode: .default)
         session.inputStream?.open()
 
-        try await withTimeout(seconds: 5, message: "abriendo el cable serial") { [weak self] in
+        try await withTimeout(
+            seconds: 5,
+            message: L10n.text("abriendo el cable serial")
+        ) { [weak self] in
             try await self?.waitForSpace()
         }
         #else
@@ -116,7 +119,7 @@ final class MFiSerialTransport: NSObject, SerialTransport {
         // que es mejor decirlo que fallar en silencio en el taller.
         assert(
             machine.baudRate > 0,
-            "Perfil invalido: revisa el baudrate de \(machine.name)"
+            L10n.format("Perfil invalido: revisa el baudrate de %@", machine.name)
         )
     }
 
@@ -137,7 +140,10 @@ final class MFiSerialTransport: NSObject, SerialTransport {
 
             if !stream.hasSpaceAvailable {
                 hasSpace = false
-                try await withTimeout(seconds: 60, message: "esperando espacio en el cable") { [weak self] in
+                try await withTimeout(
+                    seconds: 60,
+                    message: L10n.text("esperando espacio en el cable")
+                ) { [weak self] in
                     try await self?.waitForSpace()
                 }
             }
@@ -148,7 +154,8 @@ final class MFiSerialTransport: NSObject, SerialTransport {
             }
 
             if written < 0 {
-                let detail = stream.streamError?.localizedDescription ?? "el cable rechazo los datos"
+                let detail = stream.streamError?.localizedDescription
+                    ?? L10n.text("el cable rechazo los datos")
                 throw TransportError.writeFailed(detail)
             }
             if written == 0 {
@@ -208,7 +215,9 @@ final class MFiSerialTransport: NSObject, SerialTransport {
         let deadline = (machine?.dripFeed ?? false) ? nil : Date().addingTimeInterval(120)
         while flowPaused {
             if let deadline, Date() > deadline {
-                throw TransportError.timeout("esperando a que la maquina reciba (XOFF sin XON)")
+                throw TransportError.timeout(
+                    L10n.text("esperando a que la maquina reciba (XOFF sin XON)")
+                )
             }
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 flowWaiters.append(cont)

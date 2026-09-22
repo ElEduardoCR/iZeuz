@@ -14,6 +14,8 @@ struct ZeuzDNCApp: App {
                 .environment(model.transfer)
                 .environment(model.smbSettings)
                 .environment(model.agentSettings)
+                .environment(model.piProvisioning)
+                .environment(model.workshopStatus)
         }
     }
 }
@@ -29,12 +31,14 @@ final class AppModel {
     let transfer = TransferController()
     let smbSettings = SMBSettingsStore()
     let agentSettings = ZeuzAgentSettingsStore()
+    let piProvisioning = PiProvisioningManager()
+    let workshopStatus = WorkshopStatusStore()
     private var connectionMonitorTask: Task<Void, Never>?
-    private let connectionRetryInterval: Duration = .seconds(60)
+    private let connectionRetryInterval: Duration = .seconds(15)
 
     /// Se muestra la hoja de ajustes al abrir si todavia no hay share.
     var showsOnboarding: Bool {
-        !agentSettings.isReady && !smbSettings.settings.isConfigured
+        !agentSettings.isReady
     }
 
     /// El editor esta abierto encima de la lista.
@@ -49,18 +53,20 @@ final class AppModel {
     var blockers: [String] {
         var reasons: [String] = []
         if !programs.connectionState.isConnected {
-            reasons.append("Conecta Zeuz Agent")
+            reasons.append(L10n.text("Conecta con el taller ZEUZ"))
         }
         if programs.document == nil {
-            reasons.append("Elige un programa")
+            reasons.append(L10n.text("Elige un programa"))
         } else if programs.hasUnsavedChanges {
-            reasons.append("Guarda los cambios antes de enviar")
+            reasons.append(L10n.text("Guarda los cambios antes de enviar"))
         }
         if machines.selected == nil {
-            reasons.append("Selecciona una maquina")
+            reasons.append(L10n.text("Selecciona una maquina"))
         }
-        if endpoints.selected == nil {
-            reasons.append("Selecciona un puerto")
+        // Con Zeuz Agent, la máquina ya incluye su Orange Pi y configuración
+        // serial. Los puertos manuales se conservan solo para el modo directo.
+        if !agentSettings.isReady && endpoints.selected == nil {
+            reasons.append(L10n.text("Selecciona un puerto"))
         }
         return reasons
     }
@@ -69,30 +75,35 @@ final class AppModel {
         blockers.isEmpty && !transfer.isSending
     }
 
-    // MARK: - Sincronizacion de maquinas con la Pi
+    // MARK: - Sincronizacion de maquinas con ZeuzDNC
 
-    /// Cliente del puente ZeuzDNC con el que sincronizar. Usa el puerto elegido
-    /// si es un puente, y si no el primero que haya dado de alta: los perfiles
-    /// de maquina son de la Pi aunque en este momento se este apuntando a otro
-    /// puerto.
-    var bridgeClient: ZeuzBridgeClient? {
-        let endpoint = endpoints.selected.flatMap { $0.kind == .zeuzBridge ? $0 : nil }
-            ?? endpoints.endpoints.first { $0.kind == .zeuzBridge }
-        guard let endpoint, !endpoint.host.isEmpty else { return nil }
-        return ZeuzBridgeClient(host: endpoint.host, port: endpoint.port)
+    /// El iPhone habla solamente con ZeuzAgent. El agente localiza ZeuzDNC y
+    /// retransmite estas operaciones sin exponer ni guardar su IP en la app.
+    var dncClient: (any ZeuzDNCClient)? {
+        guard agentSettings.isReady else { return nil }
+        return ZeuzAgentProgramClient(
+            settings: agentSettings.settings,
+            token: agentSettings.token
+        )
     }
 
-    /// Trae los perfiles de la Pi. Devuelve el mensaje de error, o nil si fue bien.
-    func syncMachinesFromPi() async -> String? {
-        guard let bridgeClient else {
-            return "Da de alta un puerto \"Puente ZeuzDNC\" con la IP de la Raspberry Pi para sincronizar."
+    /// Sustituye la copia del iPhone por los perfiles actuales de ZeuzDNC.
+    func syncMachinesFromZeuzDNC() async -> String? {
+        guard let dncClient else {
+            return L10n.text("Conecta Zeuz Agent antes de sincronizar con ZeuzDNC.")
         }
         do {
-            try await machines.syncFromPi(bridgeClient)
+            try await machines.syncFromZeuzDNC(dncClient)
             return nil
         } catch {
             return error.localizedDescription
         }
+    }
+
+    /// Aplica automáticamente los cambios hechos en la pantalla de ZeuzDNC.
+    func checkMachineSynchronization() async {
+        guard let dncClient else { return }
+        _ = try? await machines.syncFromZeuzDNCIfChanged(dncClient)
     }
 
     func connectIfPossible() async {
@@ -102,19 +113,16 @@ final class AppModel {
                 agent: agentSettings.settings,
                 token: agentSettings.token
             )
-        } else if smbSettings.settings.isConfigured {
-            await programs.connect(
-                settings: smbSettings.settings,
-                password: smbSettings.password
-            )
+
         } else {
             return
         }
         guard !Task.isCancelled, programs.connectionState.isConnected else { return }
-        // Al arrancar, dejamos los perfiles iguales a los de la Pi sin que haya
-        // que acordarse de sincronizar a mano. Si la Pi no responde, se ignora:
-        // no es motivo para bloquear la app.
-        _ = await syncMachinesFromPi()
+        if machines.lastSync == nil {
+            _ = await syncMachinesFromZeuzDNC()
+        } else {
+            await checkMachineSynchronization()
+        }
     }
 
     func reconnect() async {
@@ -122,13 +130,16 @@ final class AppModel {
         await connectIfPossible()
     }
 
-    // MARK: - Ciclo de vida de la conexion SMB
+    // MARK: - Ciclo de vida de la conexión al taller
 
     /// Al abrir o volver a la app comprueba la sesion inmediatamente. Mientras
-    /// la app siga activa vuelve a intentarlo cada minuto si la red o SMB
+    /// la app siga activa vuelve a intentarlo cada minuto si la red o el servidor
     /// dejaron de responder.
     func startConnectionMonitoring() {
         stopConnectionMonitoring()
+        if let dncClient {
+            workshopStatus.start(client: dncClient)
+        }
         connectionMonitorTask = Task { [weak self] in
             guard let self else { return }
             await self.maintainConnection()
@@ -144,11 +155,25 @@ final class AppModel {
     func stopConnectionMonitoring() {
         connectionMonitorTask?.cancel()
         connectionMonitorTask = nil
+        workshopStatus.stop()
         programs.stopAutoRefresh()
     }
 
+    /// Consulta todos los destinos configurados sin mandar ninguna orden a las
+    /// Raspberry. La pantalla de taller tambien usa esto para pull-to-refresh.
+    func refreshWorkshopStatus() async {
+        guard let dncClient else { return }
+        await workshopStatus.refresh(client: dncClient)
+    }
+
     private func maintainConnection() async {
-        guard (agentSettings.isReady || smbSettings.settings.isConfigured),
+        if machines.lastSync == nil {
+            _ = await syncMachinesFromZeuzDNC()
+        } else {
+            await checkMachineSynchronization()
+        }
+
+        guard agentSettings.isReady,
               !transfer.isSending,
               !programs.isLoading
         else { return }
@@ -192,18 +217,32 @@ final class AppModel {
         }
     }
 
-    /// Manda el programa abierto a la maquina y puerto elegidos.
+    /// Manda el programa a la máquina elegida. En el flujo normal Zeuz Agent
+    /// resuelve automáticamente la Orange Pi y su adaptador RS232.
     func send() {
         guard canSend,
               let document = programs.sendableDocument,
-              let machine = machines.selected,
-              let endpoint = endpoints.selected
+              let machine = machines.selected
         else { return }
+
+        let endpoint: SerialEndpoint
+        if agentSettings.isReady {
+            endpoint = SerialEndpoint(name: agentSettings.settings.displayName, kind: .zeuzBridge)
+        } else if let selected = endpoints.selected {
+            endpoint = selected
+        } else {
+            return
+        }
 
         // Mientras se transmite no queremos que el sondeo recargue la carpeta
         // ni compita por la red con el envio.
         programs.stopAutoRefresh()
-        transfer.send(document: document, machine: machine, endpoint: endpoint)
+        transfer.send(
+            document: document,
+            machine: machine,
+            endpoint: endpoint,
+            dncClient: dncClient
+        )
     }
 
     func finishTransfer() {

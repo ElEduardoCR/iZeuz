@@ -36,25 +36,24 @@ enum TransportError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .notConnected:
-            "No hay conexion con el puerto"
+            L10n.text("No hay conexion con el puerto")
         case .connectionFailed(let detail):
-            "No se pudo conectar: \(detail)"
+            L10n.format("No se pudo conectar: %@", detail)
         case .handshakeFailed(let detail):
-            "El puente rechazo la configuracion del puerto: \(detail)"
+            L10n.format("El puente rechazo la configuracion del puerto: %@", detail)
         case .writeFailed(let detail):
-            "Error al enviar: \(detail)"
+            L10n.format("Error al enviar: %@", detail)
         case .timeout(let detail):
-            "Se agoto el tiempo \(detail)"
+            L10n.format("Se agoto el tiempo %@", detail)
         case .accessoryNotFound:
-            "No se encontro el cable serial conectado al telefono"
+            L10n.text("No se encontro el cable serial conectado al telefono")
         case .accessoryProtocolMismatch(let proto):
-            """
-            iOS no abrio la sesion con el cable. Revisa que "\(proto)" \
-            este declarado en UISupportedExternalAccessoryProtocols del Info.plist \
-            y que coincida con el protocolo del cable.
-            """
+            L10n.format(
+                "iOS no abrio la sesion con el cable. Revisa que \"%@\" este declarado en UISupportedExternalAccessoryProtocols del Info.plist y que coincida con el protocolo del cable.",
+                proto
+            )
         case .cancelled:
-            "Envio cancelado"
+            L10n.text("Envio cancelado")
         }
     }
 }

@@ -11,10 +11,14 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(ProgramStore.self) private var programs
+    @Environment(PiProvisioningManager.self) private var provisioning
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var showsSettings = false
+    @State private var showsZeuzStatus = false
     @State private var sendBarHeight: CGFloat = 0
+    @State private var showsPiProvisioning = false
+    @State private var presentedNearbyPi = false
 
     var body: some View {
         @Bindable var model = model
@@ -23,6 +27,7 @@ struct RootView: View {
         NavigationStack {
             ProgramBrowserView(
                 showsSettings: $showsSettings,
+                showsZeuzStatus: $showsZeuzStatus,
                 bottomClearance: model.showsEditor ? 0 : sendBarHeight
             )
                 .navigationDestination(isPresented: $model.showsEditor) {
@@ -49,6 +54,25 @@ struct RootView: View {
         .animation(.smooth(duration: 0.28), value: model.showsEditor)
         .task {
             model.startConnectionMonitoring()
+            let alreadySaved = model.endpoints.endpoints.contains {
+                $0.kind == .zeuzBridge
+                    && $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .caseInsensitiveCompare("zeuz") == .orderedSame
+            }
+            if !alreadySaved, await provisioning.recoverConfiguredZeuz() {
+                presentedNearbyPi = true
+                showsPiProvisioning = true
+            } else {
+                provisioning.startScanning()
+            }
+        }
+        .onChange(of: provisioning.nearby.count) { _, count in
+            guard count > 0,
+                  !presentedNearbyPi,
+                  !showsSettings
+            else { return }
+            presentedNearbyPi = true
+            showsPiProvisioning = true
         }
         .onChange(of: scenePhase) { _, phase in
             // En segundo plano no tiene sentido seguir sondeando el share:
@@ -64,6 +88,12 @@ struct RootView: View {
         }
         .sheet(isPresented: $showsSettings) {
             SettingsView()
+        }
+        .sheet(isPresented: $showsPiProvisioning) {
+            PiProvisioningView()
+        }
+        .sheet(isPresented: $showsZeuzStatus) {
+            ZeuzStatusView()
         }
         .alert(
             "Algo salio mal",

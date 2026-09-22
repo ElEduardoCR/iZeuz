@@ -33,7 +33,7 @@ enum SMBPath {
     }
 
     static func breadcrumb(for path: String) -> [Breadcrumb] {
-        var crumbs = [Breadcrumb(name: "Programas", path: "")]
+        var crumbs = [Breadcrumb(name: L10n.text("Programas"), path: "")]
         var accumulated = ""
         for part in sanitize(path).split(separator: "/") {
             accumulated = accumulated.isEmpty ? String(part) : "\(accumulated)/\(part)"

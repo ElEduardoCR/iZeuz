@@ -43,6 +43,21 @@ elegir otro puerto en la interfaz.
 
 ## Puesta en marcha
 
+### 0. Configurar una Orange Pi nueva sin pantalla
+
+1. Graba la imagen Zeuz DNC 0.3 o posterior e inserta la microSD.
+2. Enciende la Pi y espera a que termine el primer arranque y reinicio automático.
+3. La app detecta por Bluetooth el equipo `zeuz` y abre el asistente.
+4. Introduce el SSID, la contraseña y la configuración serial inicial de la
+   máquina (nombre, baudrate, bits, paridad, flujo y fin de línea).
+5. Cuando la Orange Pi obtenga IP, la app la registra automáticamente como
+   **Puente ZeuzDNC** en el puerto `5000`.
+6. En el mismo asistente introduce la dirección y el código de seis dígitos de
+   Zeuz Agent para conectar la biblioteca tanto al iPhone como a la Orange Pi.
+
+Bluetooth se utiliza solamente para el alta inicial. Los programas, el control
+de la Pi y los envíos posteriores circulan por la red local.
+
 ### 1. Abrir el proyecto
 
 ```bash
@@ -94,42 +109,41 @@ recarga solo si cambio.
 
 ### 3. Configurar el puente serial
 
-#### Opcion A — Raspberry Pi que YA corre ZeuzDNC (recomendada si la tienes)
+#### Opcion A — dispositivo ZeuzDNC (recomendada)
 
-Si ya tienes una Raspberry Pi con el ZeuzDNC de la Pi conectada a la maquina
-y enviando programas, **no hace falta instalar nada ni tocar el puerto**. El
-iPhone le **delega** el envio: le da la orden por HTTP y la Pi saca el G-code
-por su propio cable, con el perfil de maquina que ella ya tiene probado.
+Si ya tienes ZeuzDNC conectado a la maquina y enviando programas, **no hace
+falta instalar nada ni tocar el puerto**. El iPhone le delega el envio por HTTP
+y Zeuz usa su propio cable y el perfil de maquina que ya tiene probado.
 
-En la app: **Ajustes → Puertos → Puerto nuevo → "Puente ZeuzDNC (Raspberry
-Pi)"**. Pon la IP que muestra la pantalla de la Pi y el puerto `5000`.
+En la app: **Ajustes → Puertos → Puerto nuevo → "Dispositivo ZeuzDNC"**. Pon
+la IP que muestra la pantalla de Zeuz y el puerto `5000`.
 
 | Campo | Valor |
 |---|---|
-| IP | la de la Pi (ej. `192.168.1.50`) |
+| IP | la de ZeuzDNC (ej. `192.168.1.50`) |
 | Puerto HTTP | `5000` |
-| Puerto serial | vacio (con un solo adaptador la Pi lo elige sola) |
+| Puerto serial | vacio (con un solo adaptador Zeuz lo elige solo) |
 
-**Los perfiles de maquina se sincronizan desde la Pi.** En **Ajustes → Maquinas
-→ Sincronizar con la Raspberry Pi** el telefono trae los perfiles reales de
-ella y los marca con **PI**. Tambien se sincroniza solo al abrir la app.
+**ZeuzDNC es la fuente autoritativa de los perfiles de maquina.** En **Ajustes
+→ Maquinas → Sync with ZeuzDNC** el telefono sustituye su copia por los perfiles
+reales y los marca con **ZEUZ**. La app comprueba diferencias periódicamente y
+avisa cuando hace falta resincronizar.
 
-Esto importa mas de lo que parece: al enviar por el puente, **la config serial
-la aplica la Pi**, no el iPhone. Sin sincronizar puedes estar viendo `9600 8N1`
-en el telefono mientras la Pi manda a `38400 7E1` — y perseguir un "error de
+Esto importa mas de lo que parece: al enviar, **la config serial la aplica
+ZeuzDNC**, no el iPhone. Sin sincronizar puedes estar viendo `9600 8N1` en el
+telefono mientras Zeuz manda a `38400 7E1` — y perseguir un "error de
 paridad" que en realidad es que estabas leyendo la configuracion equivocada.
 
-Editar una maquina marcada **PI** desde el telefono **la cambia tambien en la
-Pi**: hay una sola configuracion, no dos que se desincronizan. La maquina se
-empareja por **nombre**, asi que despues de sincronizar los nombres ya coinciden
-solos.
+Las maquinas marcadas **ZEUZ** se editan en la pantalla de ZeuzDNC. El iPhone
+las mantiene de solo lectura para que nunca existan dos configuraciones
+contradictorias.
 
 Al picar **ENVIAR**, el iPhone hace, contra la API que ZeuzDNC ya expone:
 elige la maquina (`/api/machine/select`) y **da la orden** (`/api/send`) sobre
-el archivo que **ya esta en la Pi**; luego sondea `/api/transfer/status` para la
+el archivo que **ya esta en Zeuz**; luego sondea `/api/transfer/status` para la
 barra de progreso. **No reescribe el programa** — manda el mismo archivo que el
-boton de la pantalla de la Pi, byte por byte. Por eso el iPhone edita y guarda
-por SMB directo sobre la carpeta de la Pi: asi el archivo ya esta actualizado
+boton de la pantalla de Zeuz, byte por byte. Por eso el iPhone edita y guarda
+por SMB directo sobre la carpeta de Zeuz: asi el archivo ya esta actualizado
 cuando llega la orden.
 
 > **Probar sin la maquina:** `python3 Tools/fake_zeuz_pi.py` levanta una Pi
@@ -196,15 +210,14 @@ quieras (*Torno chico*, *Fresadora del fondo*). Para un hub, usa **Puente con
 hub** y los crea todos de golpe.
 
 **Ajustes → Maquinas.** Si usas el puente ZeuzDNC, lo primero es
-**Sincronizar con la Raspberry Pi**: trae los perfiles reales de tus maquinas
-y sustituye a los de fabrica. Quedan marcados con **PI** y editarlos aqui los
-cambia tambien alla.
+**Sync with ZeuzDNC**: trae los perfiles reales de tus maquinas y sustituye a
+los de fabrica. Quedan marcados con **ZEUZ** y se administran desde ZeuzDNC.
 
 Sin Pi (cable MFi o ser2net) los perfiles se dan de alta a mano; vienen Fanuc
 (4800 7E2, XON/XOFF, CR) y Fadal (9600 8N1, XON/XOFF, CRLF) solo como semilla.
 
 > ⚠️ Los valores de fabrica son **tipicos, no verificados para tu maquina** — y
-> es muy probable que no se parezcan a los tuyos. Sincroniza con la Pi, o
+> es muy probable que no se parezcan a los tuyos. Sincroniza con ZeuzDNC, o
 > confirmalos contra el manual de cada control antes de produccion.
 
 ### 5. Probar sin hardware
@@ -386,3 +399,30 @@ automática de un agente descubierto se agregará en el siguiente incremento;
 por ahora puede escribirse su IP o nombre `.local`.
 
 ---
+
+### Conexión al taller y edición de perfiles
+
+Ajustes presenta una sola conexión ZEUZ mediante dirección y código. Ya no muestra
+SMB, sus credenciales ni opciones de puertos para el flujo del taller. Una instalación
+que sólo tenía SMB abre la configuración de ZEUZ; no se borran sus preferencias,
+credenciales, perfiles ni archivos. Los transportes existentes siguen en el código.
+
+La lista de máquinas incluye **Editar** y abre el formulario serial existente. Guarda
+primero en el equipo conectado; conserva el borrador si hay un error o conflicto de
+revisión. La lista se actualiza periódicamente. Los cambios de la pantalla táctil y
+Agent llegan por el mismo contrato de perfiles.
+
+Cuando Agent confirma el servidor Pi, iZeuz guarda su dirección y utiliza el mismo
+acceso emparejado para continuar si la computadora se desconecta. Conserva ese destino
+para nuevas operaciones. Una escritura/envío con respuesta perdida no se repite:
+iZeuz pide revisar su estado antes de repetir. El servidor del taller atiende los
+programas y enruta las máquinas a sus Pi sin depender de Agent.
+
+Validación del cliente con transporte simulado y los archivos Swift de producción:
+
+```sh
+bash Tools/verify_workshop.sh
+```
+
+Cubre descubrimiento del servidor de respaldo, cambio de conexión, persistencia del
+destino, revisiones de perfiles y ausencia de reenvío de órdenes inciertas.

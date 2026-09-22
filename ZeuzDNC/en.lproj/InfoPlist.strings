@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "ZeuzDNC";
+"CFBundleName" = "ZeuzDNC";
+"NSLocalNetworkUsageDescription" = "ZeuzDNC needs access to the local network to read programs from the shared folder and send G-code to the serial bridge.";

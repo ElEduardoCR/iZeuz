@@ -11,12 +11,16 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>ZeuzDNC necesita la red local para leer los programas de la carpeta compartida y para enviar el G-code al puente serial de la maquina.</string>
 
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>ZeuzDNC usa Bluetooth para detectar y configurar por primera vez la red Wi-Fi y la máquina de una Orange Pi sin pantalla.</string>
+
 	<!-- Permite descubrir servidores SMB y puentes seriales por Bonjour. -->
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_smb._tcp</string>
 		<string>_device-info._tcp</string>
 		<string>_zeuz-agent._tcp</string>
+		<string>_zeuz-dnc._tcp</string>
 	</array>
 
 	<!-- El puente ZeuzDNC habla HTTP plano con la Raspberry Pi en la LAN

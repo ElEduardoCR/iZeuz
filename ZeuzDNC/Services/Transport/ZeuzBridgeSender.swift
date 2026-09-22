@@ -9,10 +9,9 @@ import Foundation
 ///
 /// La secuencia al picar ENVIAR:
 /// 1. pedir la lista de maquinas de la Pi y emparejar por nombre,
-/// 2. (si hay varios adaptadores) elegir el puerto serial,
-/// 3. seleccionar la maquina en la Pi,
-/// 4. **dar la orden de enviar** el archivo que YA esta en la Pi,
-/// 5. sondear el estado hasta que termine.
+/// 2. seleccionar la máquina en Zeuz Agent,
+/// 3. **dar la orden de enviar**; el agente adjunta el perfil y el destino,
+/// 4. sondear el estado hasta que termine.
 ///
 /// ## Por que NO reescribe el archivo
 ///
@@ -28,16 +27,25 @@ enum ZeuzBridgeSender {
     /// Cada cuanto se le pregunta a la Pi como va. 400 ms se siente en vivo sin
     /// saturar el Flask de un solo hilo por peticion.
     static let pollInterval: Duration = .milliseconds(400)
+    /// Al desbloquear el iPhone, Wi-Fi puede tardar unos segundos en volver.
+    /// Un fallo de sondeo no significa que la Pi haya detenido el goteo.
+    static let statusRetryAttempts = 30
+
+    /// Una escritura bloqueada por XOFF puede no salir con el primer
+    /// `cancel_write()` de pyserial. Repetimos la orden y comprobamos el estado
+    /// remoto para que CANCELAR signifique que la Pi realmente se detuvo.
+    static let cancelAttempts = 8
+    static let cancelRetryInterval: Duration = .milliseconds(400)
 
     static func send(
         document: ProgramDocument,
         machine: Machine,
-        endpoint: SerialEndpoint
+        endpoint: SerialEndpoint,
+        client: any ZeuzDNCClient
     ) -> AsyncStream<TransferEvent> {
         AsyncStream { continuation in
-            let client = ZeuzBridgeClient(host: endpoint.host, port: endpoint.port)
-
             let task = Task {
+                var activeMachineID = machine.id
                 do {
                     continuation.yield(.connecting)
 
@@ -50,35 +58,43 @@ enum ZeuzBridgeSender {
                     }) else {
                         throw ZeuzBridgeError.machineNotFound(machine.name)
                     }
+                    activeMachineID = pick.id
 
                     try Task.checkCancellation()
 
-                    // 2. Puerto serial de la Pi, solo si el puerto trae uno anotado
-                    //    (hub con varios adaptadores). Con uno solo, la Pi elige.
-                    if !endpoint.bridgePort.isEmpty {
-                        try? await client.selectDevice(path: endpoint.bridgePort)
-                    }
-
-                    // 3. Maquina activa en la Pi (por id, ya emparejada por nombre).
+                    // 2. Máquina activa en Zeuz Agent. Su perfil ya contiene la
+                    //    Orange Pi asignada y todos los parámetros seriales.
                     try await client.selectMachine(id: pick.id)
 
                     try Task.checkCancellation()
 
-                    // 4. La orden, sobre el archivo que YA esta en la Pi. No se
-                    //    reescribe nada: se manda tal cual, identico al boton de
-                    //    la Pi. Si falta algo (cable, puerto, otra transferencia
-                    //    en curso) la Pi lo dice aqui y se muestra tal cual.
-                    try await client.send(path: document.path)
+                    // 3. La orden. La Pi descarga ese mismo archivo del agente y
+                    //    recibe el perfil serial junto con la solicitud.
+                    try await client.send(path: document.path, machineID: pick.id)
 
-                    // 5. Seguir el envio que ya corre en la Pi.
-                    try await pollUntilDone(client: client, continuation: continuation)
-                } catch is CancellationError {
-                    await client.cancel()
-                    continuation.yield(.cancelled)
-                } catch let error as ZeuzBridgeError {
-                    continuation.yield(.failed(error.errorDescription ?? "Error con el puente"))
+                    // 4. Seguir el envío que ya corre en la Pi.
+                    try await pollUntilDone(
+                        client: client,
+                        machineID: pick.id,
+                        continuation: continuation
+                    )
                 } catch {
-                    continuation.yield(.failed(error.localizedDescription))
+                    if error is CancellationError || Task.isCancelled {
+                        let machineID = activeMachineID
+                        // No heredar la cancelacion de la tarea de sondeo: una
+                        // URLSession iniciada desde ella se cancelaba antes de
+                        // alcanzar a Zeuz Agent/Raspberry Pi.
+                        await Task.detached(priority: .userInitiated) {
+                            await cancelRemotely(client: client, machineID: machineID)
+                        }.value
+                        continuation.yield(.cancelled)
+                    } else if let bridgeError = error as? ZeuzBridgeError {
+                        continuation.yield(.failed(
+                            bridgeError.errorDescription ?? L10n.text("Error con el puente")
+                        ))
+                    } else {
+                        continuation.yield(.failed(error.localizedDescription))
+                    }
                 }
                 continuation.finish()
             }
@@ -87,16 +103,44 @@ enum ZeuzBridgeSender {
         }
     }
 
+    /// Cancela fuera de la tarea de sondeo y no regresa hasta confirmar que la
+    /// Pi dejo de reportar `sending` o agotar los reintentos.
+    static func cancelRemotely(client: any ZeuzDNCClient, machineID: String) async {
+        for attempt in 0..<cancelAttempts {
+            await client.cancel(machineID: machineID)
+            if let snapshot = try? await client.status(machineID: machineID),
+               snapshot.status != "sending" {
+                return
+            }
+            guard attempt + 1 < cancelAttempts else { return }
+            try? await Task.sleep(for: cancelRetryInterval)
+        }
+    }
+
     /// Sondea `/api/transfer/status` y traduce cada estado de la Pi a un evento.
     private static func pollUntilDone(
-        client: ZeuzBridgeClient,
+        client: any ZeuzDNCClient,
+        machineID: String,
         continuation: AsyncStream<TransferEvent>.Continuation
     ) async throws {
         var announcedTotal = false
+        var consecutiveStatusFailures = 0
 
         while true {
             try Task.checkCancellation()
-            let snap = try await client.status()
+            let snap: ZeuzBridgeClient.PiTransfer
+            do {
+                snap = try await client.status(machineID: machineID)
+                consecutiveStatusFailures = 0
+            } catch {
+                try Task.checkCancellation()
+                consecutiveStatusFailures += 1
+                guard consecutiveStatusFailures < statusRetryAttempts else {
+                    throw error
+                }
+                try await Task.sleep(for: pollInterval)
+                continue
+            }
 
             switch snap.status {
             case "sending":
@@ -121,7 +165,9 @@ enum ZeuzBridgeSender {
 
             case "error":
                 continuation.yield(.failed(
-                    snap.message.isEmpty ? "La Raspberry Pi reporto un error en el envio" : snap.message
+                    snap.message.isEmpty
+                        ? L10n.text("ZeuzDNC reportó un error en el envío")
+                        : snap.message
                 ))
                 return
 

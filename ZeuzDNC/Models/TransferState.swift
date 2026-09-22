@@ -25,13 +25,13 @@ struct TransferState: Sendable, Equatable {
 
         var label: String {
             switch self {
-            case .idle: "Listo"
-            case .connecting: "Conectando…"
-            case .sending: "Enviando…"
-            case .finishing: "Finalizando…"
-            case .success: "Transferencia completada"
-            case .error: "Error"
-            case .cancelled: "Envio cancelado"
+            case .idle: L10n.text("transfer.status.ready", fallback: "Listo")
+            case .connecting: L10n.text("Conectando…")
+            case .sending: L10n.text("Enviando…")
+            case .finishing: L10n.text("Finalizando…")
+            case .success: L10n.text("Transferencia completada")
+            case .error: L10n.text("Error")
+            case .cancelled: L10n.text("Envio cancelado")
             }
         }
     }
@@ -50,7 +50,7 @@ struct TransferState: Sendable, Equatable {
         guard totalBytes > 0 else { return "" }
         let sent = ByteCountFormatter.string(fromByteCount: Int64(bytesSent), countStyle: .file)
         let total = ByteCountFormatter.string(fromByteCount: Int64(totalBytes), countStyle: .file)
-        return "\(sent) de \(total)"
+        return L10n.format("%@ de %@", sent, total)
     }
 
     static let idle = TransferState()

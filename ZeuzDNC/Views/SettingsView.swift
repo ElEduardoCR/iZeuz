@@ -1,22 +1,18 @@
 import SwiftUI
 
-/// Ajustes: carpeta compartida, maquinas y puertos.
+/// Conexión al taller y perfiles de máquinas.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ProgramStore.self) private var programs
-    @Environment(SMBSettingsStore.self) private var smb
     @Environment(ZeuzAgentSettingsStore.self) private var agent
     @Environment(MachineStore.self) private var machines
     @Environment(EndpointStore.self) private var endpoints
     @Environment(\.dismiss) private var dismiss
 
-    @State private var draft = SMBSettings()
-    @State private var password = ""
     @State private var agentURL = ""
     @State private var pairingCode = ""
     @State private var pairingError = ""
     @State private var isPairing = false
-    @State private var isTesting = false
     @State private var showsMachines = false
     @State private var showsEndpoints = false
 
@@ -25,10 +21,9 @@ struct SettingsView: View {
             Form {
                 connectionStatusSection
                 agentSection
-                shareSection
-                credentialsSection
                 catalogSection
                 aboutSection
+                appVersionSection
             }
             .navigationTitle("Ajustes")
             .navigationBarTitleDisplayMode(.inline)
@@ -36,18 +31,13 @@ struct SettingsView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cerrar") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Guardar SMB") { saveAndConnect() }
-                        .fontWeight(.semibold)
-                        .disabled(!draft.isConfigured || isTesting)
-                }
+
             }
             .sheet(isPresented: $showsMachines) { MachineListView() }
             .sheet(isPresented: $showsEndpoints) { EndpointListView() }
             .onAppear {
-                draft = smb.settings
-                password = smb.password
-                agentURL = agent.settings.normalizedURL
+                let savedURL = agent.settings.normalizedURL
+                agentURL = savedURL
             }
         }
     }
@@ -60,9 +50,10 @@ struct SettingsView: View {
             case .connected:
                 StatusPill(
                     level: .ready,
-                    text: agent.isReady
-                        ? "Conectado a \(agent.settings.displayName)"
-                        : "Conectado a \(smb.settings.displayPath)"
+                    text: L10n.format(
+                        "Conectado a %@",
+                        agent.settings.displayName
+                    )
                 )
             case .connecting:
                 StatusPill(level: .neutral, text: "Conectando…")
@@ -82,10 +73,22 @@ struct SettingsView: View {
 
     private var agentSection: some View {
         Section {
-            TextField("http://zeuz-agent.local:47820", text: $agentURL)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+            HStack {
+                TextField("Dirección del taller", text: $agentURL)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !agentURL.isEmpty {
+                    Button {
+                        agentURL = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Borrar dirección")
+                }
+            }
 
             TextField("Codigo de 6 digitos", text: $pairingCode)
                 .keyboardType(.numberPad)
@@ -108,68 +111,23 @@ struct SettingsView: View {
                     )
                 }
             }
-            .disabled(
-                agentURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || pairingCode.filter(\.isNumber).count != 6
-                    || isPairing
-            )
+            // El botón debe poder explicar qué dato falta. Si se deshabilita
+            // por validación, el operador sólo ve un control gris sin motivo.
+            .disabled(isPairing)
 
             if agent.isReady {
-                Button("Olvidar Zeuz Agent", role: .destructive) {
+                Button("Olvidar conexión", role: .destructive) {
                     agent.forget()
                     pairingCode = ""
                     Task { await model.reconnect() }
                 }
             }
         } header: {
-            Text("Zeuz Agent (recomendado)")
+            Text("Conectar con ZEUZ")
         } footer: {
             Text(
-                "Instala Zeuz Agent en la PC o Mac donde guardas los programas. "
-                    + "No requiere configurar SMB, usuarios ni carpetas compartidas."
+                "Copia la dirección y el código que muestra Zeuz Agent. Cuando el servidor del taller esté listo, iZeuz podrá seguir trabajando aunque la computadora salga del sitio."
             )
-        }
-    }
-
-    private var shareSection: some View {
-        Section {
-            TextField("Servidor (192.168.1.10)", text: $draft.host)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-
-            TextField("Recurso compartido (cnc-programs)", text: $draft.share)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-
-            TextField("Subcarpeta (opcional)", text: $draft.rootPath)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-        } header: {
-            Text("SMB legado")
-        } footer: {
-            Text(
-                "La misma carpeta que ves desde Windows o Mac. Al guardar un programa ahi, "
-                    + "aparece solo en el iPhone en unos segundos."
-            )
-        }
-    }
-
-    private var credentialsSection: some View {
-        Section {
-            TextField("Usuario", text: $draft.username)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-
-            SecureField("Contrasena", text: $password)
-
-            TextField("Dominio (opcional)", text: $draft.domain)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-        } header: {
-            Text("Credenciales")
-        } footer: {
-            Text("La contrasena se guarda en el llavero del iPhone, cifrada por el sistema.")
         }
     }
 
@@ -186,56 +144,65 @@ struct SettingsView: View {
                 }
             }
 
-            Button {
-                showsEndpoints = true
-            } label: {
-                LabeledContent {
-                    Text("\(endpoints.endpoints.count)")
-                        .foregroundStyle(.secondary)
-                } label: {
-                    Label("Puertos", systemImage: "cable.connector")
-                }
-            }
+
         }
     }
 
     private var aboutSection: some View {
         Section {
-            LabeledContent("Maquina activa", value: machines.selected?.name ?? "ninguna")
-            LabeledContent("Puerto activo", value: endpoints.selected?.name ?? "ninguno")
+            LabeledContent(
+                "Maquina activa",
+                value: machines.selected?.name ?? L10n.text("ninguna")
+            )
+
         } header: {
             Text("Seleccion actual")
         } footer: {
-            Text(
-                "ZeuzDNC para iOS. El envio por serial sale por un puente en la red WiFi o por un "
-                    + "cable certificado MFi: iOS no reconoce adaptadores USB-RS232 genericos."
-            )
+            Text(L10n.text(
+                "Los parámetros de cada máquina se comparten entre iPhone, Zeuz Agent y su pantalla táctil. Las ediciones sin conexión se concilian al volver a conectar."
+            ))
         }
+    }
+
+    private var appVersionSection: some View {
+        Section {
+            HStack(spacing: 10) {
+                Image("ZEUZMark")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 32, height: 32)
+                    .accessibilityHidden(true)
+                Text(verbatim: "ZEUZ DNC")
+                    .font(.headline)
+            }
+            LabeledContent("Versión instalada", value: installedAppVersion)
+        } header: {
+            Text("ZeuzDNC para iOS")
+        }
+    }
+
+    private var installedAppVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
     }
 
     // MARK: - Acciones
 
-    private func saveAndConnect() {
-        isTesting = true
-        // El llavero indexa por usuario+host+share, asi que la contrasena se
-        // guarda despues de fijar los datos nuevos o quedaria en otra cuenta.
-        smb.settings = draft
-        smb.password = password
-
-        Task {
-            await model.reconnect()
-            isTesting = false
-            if programs.connectionState.isConnected {
-                dismiss()
-            }
-        }
-    }
-
     private func pairAgent() {
-        isPairing = true
         pairingError = ""
         let normalized = ZeuzAgentSettings(baseURL: agentURL).normalizedURL
         let code = pairingCode.filter(\.isNumber)
+        guard ZeuzAgentSettings(baseURL: normalized).isConfigured else {
+            pairingError = "Escribe una dirección válida, por ejemplo http://192.168.1.183:47820"
+            return
+        }
+        guard code.count == 6 else {
+            pairingError = "Escribe el código de emparejamiento de 6 dígitos"
+            return
+        }
+        isPairing = true
         Task {
             do {
                 let result = try await ZeuzAgentProgramClient.pair(

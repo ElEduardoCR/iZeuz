@@ -77,6 +77,44 @@ check(
     ProgramEntry.descriptor(in: "O1234(PIEZA A)\nM30") == "(PIEZA A)"
 )
 
+// MARK: - 2b. Direccion estable de ZeuzDNC
+
+print("\n[2b] ZeuzDNC usa Bonjour aunque cambie la IP")
+
+let zeuzEndpoint = SerialEndpoint(
+    name: "zeuz-dnc-1b3b992",
+    kind: .zeuzBridge,
+    host: "192.168.1.77",
+    port: 5000
+)
+check(
+    "migra la IP anterior al hostname estable del equipo",
+    zeuzEndpoint.connectionHost == "zeuz-dnc-1b3b992.local",
+    detail: zeuzEndpoint.connectionHost
+)
+let shortZeuzEndpoint = SerialEndpoint(
+    name: "zeuz",
+    kind: .zeuzBridge,
+    host: "192.168.1.99",
+    port: 5000
+)
+check(
+    "acepta el nombre corto solicitado para la Orange",
+    shortZeuzEndpoint.connectionHost == "zeuz.local",
+    detail: shortZeuzEndpoint.connectionHost
+)
+let manualEndpoint = SerialEndpoint(
+    name: "Torno principal",
+    kind: .zeuzBridge,
+    host: "192.168.1.50",
+    port: 5000
+)
+check(
+    "conserva la IP de un puente configurado manualmente",
+    manualEndpoint.connectionHost == "192.168.1.50",
+    detail: manualEndpoint.connectionHost
+)
+
 // MARK: - 3. Tiempos de linea
 
 print("\n[3] Calculo de tiempo fisico de transmision")
@@ -101,6 +139,84 @@ check(
     "1000 bytes a 9600 8N1 tardan ~1.04 s",
     abs(fadal.transmissionTime(forBytes: 1000) - 1.0416) < 0.01,
     detail: "\(fadal.transmissionTime(forBytes: 1000))"
+)
+
+// MARK: - 3b. Cancelacion remota confirmada
+
+print("\n[3b] Cancelacion remota: reintenta hasta que la Pi se detiene")
+
+enum CancelProbeError: Error { case unused }
+
+actor CancelProbeClient: ZeuzDNCClient {
+    private var cancelCalls = 0
+
+    func machines() async throws -> [ZeuzBridgeClient.PiMachine] { throw CancelProbeError.unused }
+
+    func status(machineID: String?) async throws -> ZeuzBridgeClient.PiTransfer {
+        ZeuzBridgeClient.PiTransfer(
+            status: cancelCalls >= 3 ? "cancelled" : "sending",
+            filename: "probe.nc",
+            bytesSent: 256,
+            totalBytes: 1024,
+            percent: 25,
+            message: ""
+        )
+    }
+
+    func selectDevice(path: String) async throws { throw CancelProbeError.unused }
+    func selectMachine(id: String) async throws { throw CancelProbeError.unused }
+    func saveMachine(_ machine: Machine, isNew: Bool) async throws -> Machine {
+        throw CancelProbeError.unused
+    }
+    func deleteMachine(id: String) async throws { throw CancelProbeError.unused }
+    func send(path: String, machineID: String?) async throws { throw CancelProbeError.unused }
+    func cancel(machineID: String?) async { cancelCalls += 1 }
+    func numberOfCancelCalls() -> Int { cancelCalls }
+}
+
+let cancelProbe = CancelProbeClient()
+await ZeuzBridgeSender.cancelRemotely(client: cancelProbe, machineID: "hardinge")
+let cancelCalls = await cancelProbe.numberOfCancelCalls()
+check(
+    "repite CANCELAR y confirma el estado remoto",
+    cancelCalls == 3,
+    detail: "envio \(cancelCalls) ordenes; se esperaban 3"
+)
+
+// MARK: - 3c. Monitor de taller multi-Zeuz
+
+print("\n[3c] Monitor de taller: agrupa por cada Zeuz fisico")
+
+func piMachine(id: String, name: String, host: String) -> ZeuzBridgeClient.PiMachine {
+    ZeuzBridgeClient.PiMachine(
+        id: id,
+        name: name,
+        dncHost: host,
+        dncPort: 5000,
+        baudrate: 4800,
+        bytesize: 7,
+        parity: "E",
+        stopbits: 2,
+        flowControl: "xonxoff",
+        lineTerminator: "CR",
+        dripfeed: true
+    )
+}
+
+let workshopGroups = WorkshopStatusStore.groups(from: [
+    piMachine(id: "hardinge", name: "Hardinge", host: "zeuz-dnc-a.local"),
+    piMachine(id: "amera", name: "Amera", host: "zeuz-dnc-a.local"),
+    piMachine(id: "fadal", name: "Fadal", host: "zeuz-dnc-b.local"),
+])
+check(
+    "dos destinos de red producen dos tarjetas Zeuz",
+    workshopGroups.count == 2,
+    detail: "produjo \(workshopGroups.count) grupos"
+)
+check(
+    "una Raspberry con dos perfiles aparece una sola vez",
+    workshopGroups.first(where: { $0.id == "zeuz-dnc-a.local:5000" })?.machineNames
+        == ["Amera", "Hardinge"]
 )
 
 // MARK: - 4. Envio real por TCP

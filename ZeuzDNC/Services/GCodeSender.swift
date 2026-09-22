@@ -70,7 +70,9 @@ enum GCodeSender {
                     }
 
                     continuation.yield(.finishing(
-                        message: machine.dripFeed ? "Finalizando goteo…" : "Finalizando envio…"
+                        message: machine.dripFeed
+                            ? L10n.text("Finalizando goteo…")
+                            : L10n.text("Finalizando envio…")
                     ))
                     try await transport.drain(dripFeed: machine.dripFeed)
 
@@ -110,13 +112,24 @@ final class TransferController {
     func send(
         document: ProgramDocument,
         machine: Machine,
-        endpoint: SerialEndpoint
+        endpoint: SerialEndpoint,
+        dncClient: (any ZeuzDNCClient)? = nil
     ) {
         guard !isSending else { return }
 
         // El puente ZeuzDNC no saca bytes el mismo: le da la orden a la Pi. Por
         // eso no arma payload ni transporte; el total de bytes lo reporta la Pi.
         if endpoint.kind == .zeuzBridge {
+            guard let dncClient else {
+                state = TransferState(
+                    status: .error,
+                    fileName: document.name,
+                    machineName: machine.name,
+                    endpointName: endpoint.name,
+                    message: L10n.text("Conecta Zeuz Agent antes de enviar")
+                )
+                return
+            }
             state = TransferState(
                 status: .connecting,
                 fileName: document.name,
@@ -124,13 +137,14 @@ final class TransferController {
                 endpointName: endpoint.name,
                 bytesSent: 0,
                 totalBytes: 0,
-                message: "Enviando la orden a \(endpoint.name)…"
+                message: L10n.format("Enviando la orden a %@…", endpoint.name)
             )
             task = Task { [weak self] in
                 let events = ZeuzBridgeSender.send(
                     document: document,
                     machine: machine,
-                    endpoint: endpoint
+                    endpoint: endpoint,
+                    client: dncClient
                 )
                 for await event in events {
                     guard let self else { return }
@@ -154,7 +168,7 @@ final class TransferController {
             endpointName: endpoint.name,
             bytesSent: 0,
             totalBytes: payload.count,
-            message: "Conectando con \(endpoint.name)…"
+            message: L10n.format("Conectando con %@…", endpoint.name)
         )
 
         task = Task { [weak self] in
@@ -176,7 +190,7 @@ final class TransferController {
         task?.cancel()
         task = nil
         state.status = .cancelled
-        state.message = "Envio cancelado"
+        state.message = L10n.text("Envio cancelado")
     }
 
     func reset() {
@@ -202,10 +216,10 @@ final class TransferController {
         case .finished:
             state.status = .success
             state.bytesSent = state.totalBytes
-            state.message = "Transferencia completada"
+            state.message = L10n.text("Transferencia completada")
         case .cancelled:
             state.status = .cancelled
-            state.message = "Envio cancelado"
+            state.message = L10n.text("Envio cancelado")
         case .failed(let message):
             state.status = .error
             state.message = message

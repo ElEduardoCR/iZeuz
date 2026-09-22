@@ -24,7 +24,7 @@ struct SMBSettings: Codable, Equatable, Sendable {
     }
 
     var displayPath: String {
-        guard isConfigured else { return "Sin configurar" }
+        guard isConfigured else { return L10n.text("Sin configurar") }
         let base = "smb://\(host)/\(share)"
         return rootPath.isEmpty ? base : "\(base)/\(rootPath)"
     }

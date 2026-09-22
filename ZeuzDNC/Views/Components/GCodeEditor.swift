@@ -236,7 +236,11 @@ struct GCodeScrollNavigator: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            jumpButton(icon: "arrow.up.to.line", label: "Ir al inicio", progress: 0)
+            jumpButton(
+                icon: "arrow.up.to.line",
+                label: L10n.text("Ir al inicio"),
+                progress: 0
+            )
 
             GeometryReader { geometry in
                 let height = geometry.size.height
@@ -280,7 +284,11 @@ struct GCodeScrollNavigator: View {
                 }
             }
 
-            jumpButton(icon: "arrow.down.to.line", label: "Ir al final", progress: 1)
+            jumpButton(
+                icon: "arrow.down.to.line",
+                label: L10n.text("Ir al final"),
+                progress: 1
+            )
         }
         .frame(width: 34)
         .padding(.vertical, 5)
@@ -338,7 +346,7 @@ struct GCodeLegendView: View {
                         .font(.system(.body, design: .monospaced).weight(.bold))
                         .foregroundStyle(color)
                         .frame(width: 78, alignment: .leading)
-                    Text(meaning)
+                    Text(L10n.text(meaning))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

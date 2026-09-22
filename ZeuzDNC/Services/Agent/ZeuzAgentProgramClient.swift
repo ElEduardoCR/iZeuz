@@ -1,13 +1,19 @@
 import Foundation
 
 /// Cliente nativo del contrato HTTP v1 de Zeuz Agent.
-actor ZeuzAgentProgramClient: ProgramClient {
+actor ZeuzAgentProgramClient: ProgramClient, ZeuzDNCClient {
     private let settings: ZeuzAgentSettings
     private let token: String
+    private var activeURL: String
+    private var fallbackKey: String { "zeuz.workshop.fallback:" + settings.normalizedURL }
+    private var activeKey: String { "zeuz.workshop.active:" + settings.normalizedURL }
 
     init(settings: ZeuzAgentSettings, token: String) {
         self.settings = settings
         self.token = token
+        let fallback = UserDefaults.standard.string(forKey: "zeuz.workshop.fallback:" + settings.normalizedURL)
+        let active = UserDefaults.standard.string(forKey: "zeuz.workshop.active:" + settings.normalizedURL)
+        self.activeURL = active == fallback ? (fallback ?? settings.normalizedURL) : settings.normalizedURL
     }
 
     static func pair(baseURL: String, code: String) async throws -> PairResult {
@@ -35,6 +41,11 @@ actor ZeuzAgentProgramClient: ProgramClient {
 
     func checkConnection() async throws {
         _ = try await request("GET", "/v1/programs?path=", as: AgentListing.self)
+        if activeURL == settings.normalizedURL,
+           let workshop = try? await request("GET", "/v1/workshop", as: WorkshopConnection.self),
+           !workshop.server_url.isEmpty {
+            UserDefaults.standard.set(workshop.server_url, forKey: fallbackKey)
+        }
     }
 
     func disconnect() async {}
@@ -120,7 +131,104 @@ actor ZeuzAgentProgramClient: ProgramClient {
             "/v1/changes?since=0",
             as: ChangeResponse.self
         ) else { return "" }
+        if activeURL == settings.normalizedURL,
+           let workshop = try? await request("GET", "/v1/workshop", as: WorkshopConnection.self),
+           !workshop.server_url.isEmpty {
+            UserDefaults.standard.set(workshop.server_url, forKey: fallbackKey)
+        }
         return String(value.version)
+    }
+
+    // MARK: ZeuzDNC a traves de ZeuzAgent
+
+    func machines() async throws -> [ZeuzBridgeClient.PiMachine] {
+        try await request("GET", "/v1/dnc/machines", as: [ZeuzBridgeClient.PiMachine].self)
+    }
+
+    func status(machineID: String? = nil) async throws -> ZeuzBridgeClient.PiTransfer {
+        let suffix = machineID.map { "?machine_id=\(escaped($0))" } ?? ""
+        return try await request(
+            "GET", "/v1/dnc/transfer/status\(suffix)", as: ZeuzBridgeClient.PiTransfer.self
+        )
+    }
+
+    func update(machineID: String, action: String, revision: String? = nil, requestID: String? = nil, autoInstall: Bool? = nil) async throws -> ZeuzUpdateState {
+        if action == "status" {
+            return try await request("GET", "/v1/dnc/update/status?machine_id=\(escaped(machineID))", as: ZeuzUpdateState.self)
+        }
+        return try await request("POST", "/v1/dnc/update/\(action)",
+            body: UpdateBody(machine_id: machineID, revision: revision, request_id: requestID, auto_install: autoInstall), as: ZeuzUpdateState.self)
+    }
+
+    private struct UpdateBody: Encodable {
+        let machine_id: String
+        let revision: String?
+        let request_id: String?
+        let auto_install: Bool?
+    }
+
+    func selectDevice(path: String) async throws {
+        _ = try await request(
+            "POST", "/v1/dnc/device/select", body: ["path": path], as: Ack.self
+        )
+    }
+
+    func selectMachine(id: String) async throws {
+        _ = try await request(
+            "POST", "/v1/dnc/machine/select", body: ["id": id], as: Ack.self
+        )
+    }
+
+    func saveMachine(_ machine: Machine, isNew: Bool = false) async throws -> Machine {
+        let response = try await request(
+            "POST",
+            "/v1/dnc/machine/save",
+            body: DNCMachinePayload(machine, includeID: !isNew),
+            as: SavedDNCMachine.self
+        )
+        guard let saved = response.machine else { throw ZeuzAgentError.badResponse }
+        return saved.asMachine
+    }
+
+    /// Registra el perfil creado durante el alta y lo asocia con la Orange Pi
+    /// que acaba de entrar a la red.
+    func saveProvisionedMachine(
+        _ machine: Machine,
+        dncHost: String,
+        dncPort: Int
+    ) async throws -> Machine {
+        let response = try await request(
+            "POST",
+            "/v1/dnc/machine/save",
+            body: ProvisionedDNCMachinePayload(machine, dncHost: dncHost, dncPort: dncPort),
+            as: SavedDNCMachine.self
+        )
+        guard let saved = response.machine else { throw ZeuzAgentError.badResponse }
+        return saved.asMachine
+    }
+
+    func deleteMachine(id: String) async throws {
+        _ = try await request(
+            "POST", "/v1/dnc/machine/delete", body: ["id": id], as: Ack.self
+        )
+    }
+
+    func send(path: String, machineID: String? = nil) async throws {
+        _ = try await request(
+            "POST",
+            "/v1/dnc/send",
+            body: ["path": path, "machine_id": machineID ?? ""],
+            as: Ack.self
+        )
+    }
+
+    func cancel(machineID: String? = nil) async {
+        _ = try? await request(
+            "POST",
+            "/v1/dnc/send/cancel",
+            body: ["machine_id": machineID ?? ""],
+            as: Ack.self
+        )
     }
 
     // MARK: Transporte
@@ -145,7 +253,7 @@ actor ZeuzAgentProgramClient: ProgramClient {
         body: Body?,
         as type: Response.Type
     ) async throws -> Response {
-        guard let url = URL(string: settings.normalizedURL + path) else {
+        guard let url = URL(string: activeURL + path) else {
             throw ZeuzAgentError.invalidAddress
         }
         var request = URLRequest(url: url)
@@ -157,7 +265,27 @@ actor ZeuzAgentProgramClient: ProgramClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(body)
         }
-        let data = try await Self.data(for: request)
+        let data: Data
+        do {
+            data = try await Self.data(for: request)
+        } catch ZeuzAgentError.unreachable {
+            // Only retry reads. A timed-out write/send may already have reached
+            // the CNC; the next operation can use the confirmed Pi connection.
+            guard activeURL == settings.normalizedURL,
+                  let fallback = UserDefaults.standard.string(forKey: fallbackKey),
+                  let probeURL = URL(string: fallback + "/v1/programs?path=") else { throw ZeuzAgentError.unreachable("No se pudo contactar el taller") }
+            var probe = URLRequest(url: probeURL)
+            probe.timeoutInterval = 5
+            probe.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            _ = try await Self.data(for: probe)
+            activeURL = fallback
+            UserDefaults.standard.set(fallback, forKey: activeKey)
+            guard method == "GET" else {
+                throw ZeuzAgentError.unreachable("La conexión cambió al servidor del taller. Revisa el estado antes de repetir la operación.")
+            }
+            request.url = URL(string: fallback + path)
+            data = try await Self.data(for: request)
+        }
         do {
             return try JSONDecoder().decode(Response.self, from: data)
         } catch {
@@ -195,6 +323,7 @@ extension ZeuzAgentProgramClient {
         }
     }
 
+    private struct WorkshopConnection: Decodable { let server_url: String }
     private struct PairBody: Encodable { let code: String }
     private struct EmptyBody: Encodable {}
     private struct Ack: Decodable { let ok: Bool }
@@ -207,6 +336,72 @@ extension ZeuzAgentProgramClient {
         let directory: String
         let name: String
         let kind: String
+    }
+
+    private struct SavedDNCMachine: Decodable {
+        let machine: ZeuzBridgeClient.PiMachine?
+    }
+
+    private struct DNCMachinePayload: Encodable {
+        let revision: Int?
+        let id: String?
+        let name: String
+        let baudrate: Int
+        let bytesize: Int
+        let parity: String
+        let stopbits: Int
+        let flow_control: String
+        let line_terminator: String
+        let dtr: Bool
+        let rts: Bool
+        let dripfeed: Bool
+
+        init(_ machine: Machine, includeID: Bool) {
+            revision = machine.revision
+            id = includeID ? machine.id : nil
+            name = machine.name
+            baudrate = machine.baudRate
+            bytesize = machine.dataBits
+            parity = machine.parity.rawValue
+            stopbits = machine.stopBits
+            flow_control = machine.flowControl.rawValue
+            line_terminator = machine.lineTerminator.rawValue
+            dtr = machine.dtr
+            rts = machine.rts
+            dripfeed = machine.dripFeed
+        }
+    }
+
+    private struct ProvisionedDNCMachinePayload: Encodable {
+        let id: String
+        let name: String
+        let dnc_host: String
+        let dnc_port: Int
+        let baudrate: Int
+        let bytesize: Int
+        let parity: String
+        let stopbits: Int
+        let flow_control: String
+        let line_terminator: String
+        let dtr: Bool
+        let rts: Bool
+        let dripfeed: Bool
+
+        init(_ machine: Machine, dncHost: String, dncPort: Int) {
+            id = machine.id
+            name = machine.name
+            dnc_host = dncHost
+            dnc_port = dncPort
+            baudrate = machine.baudRate
+            bytesize = machine.dataBits
+            parity = machine.parity.rawValue
+            stopbits = machine.stopBits
+            flow_control = machine.flowControl.rawValue
+            line_terminator = machine.lineTerminator.rawValue
+            dtr = machine.dtr
+            rts = machine.rts
+            dripfeed = machine.dripFeed
+        }
     }
 
     private struct AgentListing: Decodable {

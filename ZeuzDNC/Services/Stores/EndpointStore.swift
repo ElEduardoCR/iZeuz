@@ -35,6 +35,19 @@ final class EndpointStore {
 
     init() {
         endpoints = store.load() ?? []
+        // Las primeras versiones guardaban la IP asignada durante el alta.
+        // Si el router entregaba otra al reiniciar, la app seguia llamando a
+        // la direccion vieja. Los equipos creados por la imagen Zeuz traen su
+        // hostname unico en el nombre; migramos esos registros a Bonjour.
+        var migrated = false
+        for index in endpoints.indices where endpoints[index].kind == .zeuzBridge {
+            let stableHost = endpoints[index].connectionHost
+            if !stableHost.isEmpty, stableHost != endpoints[index].host {
+                endpoints[index].host = stableHost
+                migrated = true
+            }
+        }
+        if migrated { persist() }
         if let raw = UserDefaults.standard.string(forKey: selectionKey) {
             selectedID = UUID(uuidString: raw)
         }
@@ -72,6 +85,20 @@ final class EndpointStore {
         persist()
     }
 
+    @discardableResult
+    func upsertZeuzBridge(name: String, host: String, port: Int = 5000) throws -> SerialEndpoint {
+        let stableHost = SerialEndpoint.zeuzServiceHost(deviceName: name, fallback: host)
+        var endpoint = endpoints.first(where: {
+            $0.kind == .zeuzBridge && ($0.connectionHost == stableHost || $0.name == name)
+        }) ?? SerialEndpoint(name: name, kind: .zeuzBridge)
+        endpoint.name = name
+        endpoint.host = stableHost
+        endpoint.port = port
+        let saved = try save(endpoint)
+        select(saved)
+        return saved
+    }
+
     func move(from source: IndexSet, to destination: Int) {
         endpoints.move(fromOffsets: source, toOffset: destination)
         persist()
@@ -104,10 +131,10 @@ final class EndpointStore {
 
         var label: String {
             switch self {
-            case .ready: "Conectado"
-            case .unknown: "Se verifica al enviar"
-            case .disconnected: "Cable no conectado"
-            case .notConfigured: "Sin configurar"
+            case .ready: L10n.text("Conectado")
+            case .unknown: L10n.text("Se verifica al enviar")
+            case .disconnected: L10n.text("Cable no conectado")
+            case .notConfigured: L10n.text("Sin configurar")
             }
         }
     }

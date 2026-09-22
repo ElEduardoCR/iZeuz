@@ -7,6 +7,7 @@ struct ProgramBrowserView: View {
     @Environment(ProgramStore.self) private var programs
 
     @Binding var showsSettings: Bool
+    @Binding var showsZeuzStatus: Bool
     let bottomClearance: CGFloat
 
     @State private var showsNewProgram = false
@@ -54,7 +55,12 @@ struct ProgramBrowserView: View {
             }
             Button("Cancelar", role: .cancel) { newName = "" }
         } message: {
-            Text("Se creara vacio en \(programs.listing.path.isEmpty ? "la carpeta raiz" : programs.listing.path)")
+            Text(L10n.format(
+                "Se creara vacio en %@",
+                programs.listing.path.isEmpty
+                    ? L10n.text("la carpeta raiz")
+                    : programs.listing.path
+            ))
         }
         .alert("Nueva carpeta", isPresented: $showsNewFolder) {
             TextField("Nombre de la carpeta", text: $newName)
@@ -67,7 +73,7 @@ struct ProgramBrowserView: View {
             Button("Cancelar", role: .cancel) { newName = "" }
         }
         .confirmationDialog(
-            "¿Eliminar \(pendingDeletion?.name ?? "")?",
+            L10n.format("¿Eliminar %@?", pendingDeletion?.name ?? ""),
             isPresented: Binding(
                 get: { pendingDeletion != nil },
                 set: { if !$0 { pendingDeletion = nil } }
@@ -92,14 +98,14 @@ struct ProgramBrowserView: View {
         VStack(spacing: 18) {
             if programs.connectionState == .connecting {
                 ProgressView()
-                Text("Conectando con la carpeta compartida…")
+                Text("Conectando con el taller…")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
                 EmptyStateView(
                     icon: "externaldrive.badge.wifi",
-                    title: "Sin carpeta compartida",
-                    message: "Configura el servidor SMB donde estan los programas para verlos aqui.",
+                    title: "Conecta con ZEUZ",
+                    message: "Conecta con el taller usando la dirección y el código de Zeuz Agent. Tus programas permanecen en su ubicación actual.",
                     actionTitle: "Configurar",
                     action: { showsSettings = true }
                 )
@@ -228,7 +234,11 @@ struct ProgramBrowserView: View {
                 }
             }
         } header: {
-            Text(programs.isSearching ? "Buscando" : "Resultados · \(programs.searchResults.count)")
+            Text(
+                programs.isSearching
+                    ? L10n.text("Buscando")
+                    : L10n.format("Resultados · %lld", programs.searchResults.count)
+            )
         }
     }
 
@@ -303,7 +313,30 @@ struct ProgramBrowserView: View {
             }
         }
 
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button {
+                showsZeuzStatus = true
+            } label: {
+                Image(systemName: "server.rack")
+                    .overlay(alignment: .topTrailing) {
+                        if model.workshopStatus.hasActiveTransfers {
+                            Circle()
+                                .fill(ZeuzPalette.active)
+                                .frame(width: 7, height: 7)
+                                .offset(x: 3, y: -3)
+                        }
+                    }
+            }
+            .accessibilityLabel("Estado de los Zeuz")
+            .accessibilityValue(
+                model.workshopStatus.hasActiveTransfers
+                    ? L10n.format(
+                        "%lld enviando",
+                        model.workshopStatus.activeTransferCount
+                    )
+                    : L10n.text("Ningún envío en curso")
+            )
+
             Menu {
                 Button {
                     newName = ""

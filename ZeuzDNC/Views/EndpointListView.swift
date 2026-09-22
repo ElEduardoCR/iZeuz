@@ -24,10 +24,9 @@ struct EndpointListView: View {
                 } header: {
                     Text("Puertos dados de alta")
                 } footer: {
-                    Text(
-                        "iOS no reconoce adaptadores USB-serial genericos, asi que los puertos se "
-                            + "dan de alta a mano. A cambio, cada uno lleva el nombre que quieras."
-                    )
+                    Text(L10n.text(
+                        "iOS no reconoce adaptadores USB-serial genericos, asi que los puertos se dan de alta a mano. A cambio, cada uno lleva el nombre que quieras."
+                    ))
                 }
 
                 if !endpoints.connectedAccessories.isEmpty {
@@ -217,7 +216,7 @@ struct EndpointEditorView: View {
                     }
                 }
             }
-            .navigationTitle(isNew ? "Nuevo puerto" : draft.name)
+            .navigationTitle(isNew ? L10n.text("Nuevo puerto") : draft.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -242,24 +241,13 @@ struct EndpointEditorView: View {
     @ViewBuilder
     private var zeuzBridgeSection: some View {
         Section {
-            TextField("IP de la Raspberry Pi (192.168.1.50)", text: $draft.host)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-
-            LabeledContent("Puerto HTTP") {
-                TextField("5000", value: $draft.port, format: .number.grouping(.never))
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-            }
+            Label("Comunicación mediante Zeuz Agent", systemImage: "point.3.connected.trianglepath.dotted")
         } header: {
-            Text("Raspberry Pi con ZeuzDNC")
+            Text("Dispositivo ZeuzDNC")
         } footer: {
-            Text(
-                "El iPhone le da la orden a la Pi y ella manda el G-code a la maquina con su "
-                    + "propia configuracion serial. Usa la IP que muestra la pantalla de la Pi. "
-                    + "El puerto normal es 5000."
-            )
+            Text(L10n.text(
+                "El iPhone se comunica únicamente con Zeuz Agent. Zeuz Agent encuentra ZeuzDNC y retransmite la orden sin guardar otra dirección IP."
+            ))
         }
 
         Section {
@@ -267,10 +255,9 @@ struct EndpointEditorView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         } footer: {
-            Text(
-                "Dejalo vacio si la Pi tiene un solo adaptador: ella lo elige sola. Solo hace "
-                    + "falta cuando hay varios cables conectados a la misma Pi."
-            )
+            Text(L10n.text(
+                "Déjalo vacío si Zeuz tiene un solo adaptador: lo elige automáticamente. Solo hace falta cuando hay varios cables conectados."
+            ))
         }
 
         Section {
@@ -279,10 +266,9 @@ struct EndpointEditorView: View {
                     .foregroundStyle(.secondary)
             }
         } footer: {
-            Text(
-                "La maquina que elijas en el iPhone se empareja con la de la Pi que tenga el "
-                    + "mismo nombre. Manda la configuracion que la Pi tiene guardada para esa maquina."
-            )
+            Text(L10n.text(
+                "La máquina del iPhone se empareja con la de ZeuzDNC que tenga el mismo nombre. Siempre se usa la configuración guardada en ZeuzDNC."
+            ))
         }
     }
 
@@ -306,23 +292,19 @@ struct EndpointEditorView: View {
         } header: {
             Text("Puente en la red WiFi")
         } footer: {
-            Text(
-                "El puente es el equipo que tiene el adaptador USB-RS232: una Raspberry Pi, "
-                    + "un ESP32 o un servidor serial. El campo del puerto fisico es solo una nota "
-                    + "para acordarte de cual es cual cuando hay un hub."
-            )
+            Text(L10n.text(
+                "El dispositivo Zeuz tiene el adaptador USB-RS232. El campo del puerto físico es una nota para distinguirlos cuando hay un hub."
+            ))
         }
 
         Section {
             Toggle("Negociar RFC 2217", isOn: $draft.useRFC2217)
         } footer: {
-            Text(
+            Text(L10n.text(
                 draft.useRFC2217
-                    ? "La app le dice al puente el baudrate, paridad y bits del perfil de maquina en "
-                        + "cada envio. Solo funciona si el puente soporta RFC 2217."
-                    : "El puente usa la configuracion que tenga cargada. Tienes que dejarlo puesto al "
-                        + "baudrate de la maquina antes de enviar."
-            )
+                    ? "La app le dice al puente el baudrate, paridad y bits del perfil de maquina en cada envio. Solo funciona si el puente soporta RFC 2217."
+                    : "El puente usa la configuracion que tenga cargada. Tienes que dejarlo puesto al baudrate de la maquina antes de enviar."
+            ))
         }
     }
 
@@ -345,12 +327,9 @@ struct EndpointEditorView: View {
         } header: {
             Text("Cable certificado MFi")
         } footer: {
-            Text(
-                "Solo funciona con cables certificados (Redpark L2-DB9V3 o C4-DB9V). "
-                    + "Un adaptador USB-RS232 comun no sirve: iOS no lo reconoce. "
-                    + "El protocolo debe coincidir con el declarado en Info.plist. "
-                    + "Usa el numero de serie solo si hay varios cables conectados."
-            )
+            Text(L10n.text(
+                "Solo funciona con cables certificados (Redpark L2-DB9V3 o C4-DB9V). Un adaptador USB-RS232 comun no sirve: iOS no lo reconoce. El protocolo debe coincidir con el declarado en Info.plist. Usa el numero de serie solo si hay varios cables conectados."
+            ))
         }
 
         if !endpoints.connectedAccessories.isEmpty {
@@ -380,10 +359,9 @@ struct EndpointEditorView: View {
             Label("No se manda nada a ningun lado", systemImage: "info.circle")
                 .font(.subheadline)
         } footer: {
-            Text(
-                "Reproduce el envio completo respetando el tiempo real que tardaria a ese baudrate. "
-                    + "Sirve para probar la app sin el puente ni el cable."
-            )
+            Text(L10n.text(
+                "Reproduce el envio completo respetando el tiempo real que tardaria a ese baudrate. Sirve para probar la app sin el puente ni el cable."
+            ))
         }
     }
 
@@ -408,7 +386,7 @@ struct HubWizardView: View {
     @State private var host = ""
     @State private var basePort = 4196
     @State private var count = 4
-    @State private var namePrefix = "Maquina"
+    @State private var namePrefix = L10n.text("Maquina")
     @State private var errorMessage: String?
 
     var body: some View {
@@ -434,11 +412,13 @@ struct HubWizardView: View {
                 } header: {
                     Text("Puertos")
                 } footer: {
-                    Text(
-                        "Se crearan \(count) puertos, de \(basePort) a \(basePort + count - 1), "
-                            + "llamados \"\(namePrefix) 1\" … \"\(namePrefix) \(count)\". "
-                            + "Puedes renombrarlos despues uno por uno."
-                    )
+                    Text(L10n.format(
+                        "Se crearan %1$lld puertos, de %2$lld a %3$lld, llamados \"%4$@ 1\" … \"%4$@ %1$lld\". Puedes renombrarlos despues uno por uno.",
+                        count,
+                        basePort,
+                        basePort + count - 1,
+                        namePrefix
+                    ))
                 }
             }
             .navigationTitle("Puente con hub")

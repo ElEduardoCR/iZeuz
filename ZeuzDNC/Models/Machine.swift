@@ -5,6 +5,7 @@ import Foundation
 /// del ZeuzDNC de la Raspberry Pi para que los perfiles sean intercambiables.
 struct Machine: Identifiable, Codable, Hashable, Sendable {
     var id: String
+    var revision: Int?
     var name: String
     var baudRate: Int
     var dataBits: Int
@@ -32,9 +33,11 @@ struct Machine: Identifiable, Codable, Hashable, Sendable {
         lineTerminator: LineTerminator = .crlf,
         dtr: Bool = false,
         rts: Bool = false,
-        dripFeed: Bool = false
+        dripFeed: Bool = false,
+        revision: Int? = nil
     ) {
         self.id = id
+        self.revision = revision
         self.name = name
         self.baudRate = baudRate
         self.dataBits = dataBits
@@ -58,11 +61,11 @@ extension Machine {
 
         var label: String {
             switch self {
-            case .none: "Ninguna"
-            case .even: "Par"
-            case .odd: "Impar"
-            case .mark: "Mark"
-            case .space: "Space"
+            case .none: L10n.text("Ninguna")
+            case .even: L10n.text("Par")
+            case .odd: L10n.text("Impar")
+            case .mark: L10n.text("Mark")
+            case .space: L10n.text("Space")
             }
         }
     }
@@ -74,9 +77,9 @@ extension Machine {
 
         var label: String {
             switch self {
-            case .xonXoff: "XON/XOFF (software)"
-            case .rtsCts: "RTS/CTS (hardware)"
-            case .none: "Ninguno"
+            case .xonXoff: L10n.text("XON/XOFF (software)")
+            case .rtsCts: L10n.text("RTS/CTS (hardware)")
+            case .none: L10n.text("Ninguno")
             }
         }
     }
@@ -96,9 +99,9 @@ extension Machine {
 
         var label: String {
             switch self {
-            case .cr: "CR (retorno de carro)"
-            case .crlf: "CRLF (retorno + salto)"
-            case .lf: "LF (salto de linea)"
+            case .cr: L10n.text("CR (retorno de carro)")
+            case .crlf: L10n.text("CRLF (retorno + salto)")
+            case .lf: L10n.text("LF (salto de linea)")
             }
         }
     }
@@ -109,7 +112,7 @@ extension Machine {
         let flow: String = switch flowControl {
         case .xonXoff: "XON/XOFF"
         case .rtsCts: "RTS/CTS"
-        case .none: "sin flujo"
+        case .none: L10n.text("sin flujo")
         }
         return "\(baudRate) \(frame) · \(flow) · \(lineTerminator.rawValue)"
     }
@@ -139,7 +142,10 @@ extension Machine {
         ),
     ]
 
-    static let baudRateOptions = [110, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    static let baudRateOptions = [
+        110, 300, 600, 1200, 2400, 4800, 9600, 14400,
+        19200, 38400, 57600, 115200, 128000, 256000,
+    ]
 }
 
 /// Errores de validacion al dar de alta o editar una maquina.
@@ -151,10 +157,10 @@ enum MachineValidationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .emptyName: "El nombre es obligatorio"
-        case .invalidBaudRate: "El baudrate debe ser mayor que cero"
-        case .invalidDataBits: "Los bits de datos deben ser 5, 6, 7 u 8"
-        case .invalidStopBits: "Los bits de stop deben ser 1 o 2"
+        case .emptyName: L10n.text("El nombre es obligatorio")
+        case .invalidBaudRate: L10n.text("El baudrate debe ser mayor que cero")
+        case .invalidDataBits: L10n.text("Los bits de datos deben ser 5, 6, 7 u 8")
+        case .invalidStopBits: L10n.text("Los bits de stop deben ser 1 o 2")
         }
     }
 }

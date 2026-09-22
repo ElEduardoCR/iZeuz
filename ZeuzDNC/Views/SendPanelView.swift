@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Barra inferior compacta: maquina, puerto y el boton ENVIAR en una fila.
+/// Barra inferior compacta: máquina y ENVIAR. Zeuz Agent conoce qué Orange Pi
+/// pertenece a cada CNC, por lo que el operador no selecciona puertos.
 ///
 /// Como en la version de la Pi, enviar es siempre una accion manual y
 /// explicita con confirmacion — la app nunca transmite sola porque apareciera
@@ -51,19 +52,23 @@ struct SendBar: View {
         HStack(spacing: 8) {
             compactSelector(
                 icon: "gearshape.2",
-                title: machines.selected?.name ?? "Máquina",
-                accessibilityTitle: "Máquina",
-                accessibilityValue: machines.selected?.summary ?? "Sin seleccionar",
+                title: machines.selected?.name ?? L10n.text("Máquina"),
+                accessibilityTitle: L10n.text("Máquina"),
+                accessibilityValue: machines.selected?.summary
+                    ?? L10n.text("Sin seleccionar"),
                 isSet: machines.selected != nil
             ) { showsMachinePicker = true }
 
-            compactSelector(
-                icon: endpoints.selected?.kind.icon ?? "cable.connector",
-                title: endpoints.selected?.name ?? "Raspberry",
-                accessibilityTitle: "Puerto o Raspberry",
-                accessibilityValue: endpoints.selected?.destination ?? "Sin seleccionar",
-                isSet: endpoints.selected != nil
-            ) { showsPortPicker = true }
+            if !model.agentSettings.isReady {
+                compactSelector(
+                    icon: endpoints.selected?.kind.icon ?? "cable.connector",
+                    title: endpoints.selected?.name ?? "Zeuz",
+                    accessibilityTitle: L10n.text("Puerto o Zeuz"),
+                    accessibilityValue: endpoints.selected?.destination
+                        ?? L10n.text("Sin seleccionar"),
+                    isSet: endpoints.selected != nil
+                ) { showsPortPicker = true }
+            }
 
             Button {
                 model.showsSendConfirmation = true
@@ -181,19 +186,27 @@ struct SendBar: View {
     // MARK: - Confirmacion
 
     private var confirmationTitle: String {
-        guard let machine = machines.selected, let endpoint = endpoints.selected else {
-            return "Confirmar envio"
+        guard let machine = machines.selected else {
+            return L10n.text("Confirmar envio")
         }
-        return "¿Enviar a \(machine.name) por \(endpoint.name)?"
+        if model.agentSettings.isReady {
+            return L10n.format("¿Enviar a %@?", machine.name)
+        }
+        guard let endpoint = endpoints.selected else { return L10n.text("Confirmar envio") }
+        return L10n.format("¿Enviar a %1$@ por %2$@?", machine.name, endpoint.name)
     }
 
     private var confirmationMessage: String {
         guard let machine = machines.selected else { return "" }
         var lines = [machine.summary]
         if machine.dripFeed {
-            lines.append("Modo goteo: la maquina ejecuta mientras recibe. Solo se detiene con CANCELAR.")
+            lines.append(L10n.text(
+                "Modo goteo: la maquina ejecuta mientras recibe. Solo se detiene con CANCELAR."
+            ))
         } else {
-            lines.append("Asegurate de que la maquina este en modo recepcion antes de continuar.")
+            lines.append(L10n.text(
+                "Asegurate de que la maquina este en modo recepcion antes de continuar."
+            ))
         }
         return lines.joined(separator: "\n\n")
     }

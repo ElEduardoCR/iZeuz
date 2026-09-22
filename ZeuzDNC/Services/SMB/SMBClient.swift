@@ -336,27 +336,34 @@ enum SMBError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            "Falta configurar la carpeta compartida en Ajustes"
+            L10n.text("Falta configurar la carpeta compartida en Ajustes")
         case .notConnected:
-            "Sin conexion con la carpeta compartida"
+            L10n.text("Sin conexion con la carpeta compartida")
         case .invalidHost(let host):
-            "Direccion invalida: \(host)"
+            L10n.format("Direccion invalida: %@", host)
         case .connectionFailed(let detail):
-            "No se pudo conectar al share: \(detail)"
+            L10n.format("No se pudo conectar al share: %@", detail)
         case .listFailed(let path, let detail):
-            "No se pudo abrir la carpeta \(path.isEmpty ? "raiz" : path): \(detail)"
+            L10n.format(
+                "No se pudo abrir la carpeta %1$@: %2$@",
+                path.isEmpty ? L10n.text("raiz") : path,
+                detail
+            )
         case .readFailed(let path, let detail):
-            "No se pudo leer \(path): \(detail)"
+            L10n.format("No se pudo leer %1$@: %2$@", path, detail)
         case .writeFailed(let path, let detail):
-            "No se pudo guardar \(path): \(detail)"
+            L10n.format("No se pudo guardar %1$@: %2$@", path, detail)
         case .deleteFailed(let path, let detail):
-            "No se pudo eliminar \(path): \(detail)"
+            L10n.format("No se pudo eliminar %1$@: %2$@", path, detail)
         case .binaryFile(let name):
-            "\(name) no es un archivo de texto: no se puede abrir en el editor"
+            L10n.format(
+                "%@ no es un archivo de texto: no se puede abrir en el editor",
+                name
+            )
         case .invalidFilename:
-            "Nombre de archivo invalido"
+            L10n.text("Nombre de archivo invalido")
         case .alreadyExists(let name):
-            "Ya existe un archivo llamado \(name)"
+            L10n.format("Ya existe un archivo llamado %@", name)
         }
     }
 }

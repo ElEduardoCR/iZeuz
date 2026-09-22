@@ -46,7 +46,7 @@ actor NetworkBridgeTransport: SerialTransport {
         self.telnetState = TelnetState()
 
         guard let port = NWEndpoint.Port(rawValue: UInt16(endpoint.port)) else {
-            throw TransportError.connectionFailed("Puerto TCP invalido")
+            throw TransportError.connectionFailed(L10n.text("Puerto TCP invalido"))
         }
 
         let tcp = NWProtocolTCP.Options()
@@ -62,7 +62,10 @@ actor NetworkBridgeTransport: SerialTransport {
         )
         self.connection = conn
 
-        try await withTimeout(seconds: 10, message: "conectando con el puente \(endpoint.host)") {
+        try await withTimeout(
+            seconds: 10,
+            message: L10n.format("conectando con el puente %@", endpoint.host)
+        ) {
             try await self.waitUntilReady(conn)
         }
 
@@ -183,7 +186,9 @@ actor NetworkBridgeTransport: SerialTransport {
         while flowPaused {
             if let deadline, Date() > deadline {
                 throw TransportError.timeout(
-                    "esperando a que la maquina reciba (¿esta en modo recepcion? ¿control de flujo correcto?)"
+                    L10n.text(
+                        "esperando a que la maquina reciba (¿esta en modo recepcion? ¿control de flujo correcto?)"
+                    )
                 )
             }
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -273,8 +278,10 @@ actor NetworkBridgeTransport: SerialTransport {
             try await waitForComPortAck(timeout: 5)
         } catch {
             throw TransportError.handshakeFailed(
-                "no respondio a RFC 2217. Si el puente no lo soporta, apaga esa opcion "
-                    + "en el puerto y configura \(machine.baudRate) baud directamente en el puente."
+                L10n.format(
+                    "no respondio a RFC 2217. Si el puente no lo soporta, apaga esa opcion en el puerto y configura %lld baud directamente en el puente.",
+                    machine.baudRate
+                )
             )
         }
 
@@ -303,7 +310,9 @@ actor NetworkBridgeTransport: SerialTransport {
     private func failNegotiation() {
         guard let waiter = negotiationWaiter else { return }
         negotiationWaiter = nil
-        waiter.resume(throwing: TransportError.timeout("negociando RFC 2217 con el puente"))
+        waiter.resume(throwing: TransportError.timeout(
+            L10n.text("negociando RFC 2217 con el puente")
+        ))
     }
 
     private static func escapeIAC(_ data: Data) -> Data {
