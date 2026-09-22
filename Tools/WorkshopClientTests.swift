@@ -27,6 +27,8 @@ final class WorkshopURLProtocol: URLProtocol, @unchecked Sendable {
             body = #"[{"id":"lathe","name":"Torno","revision":7,"baudrate":19200,"bytesize":8,"parity":"N","stopbits":1,"flow_control":"none","line_terminator":"CRLF"}]"#
         } else if path == "/v1/dnc/machine/save" {
             body = #"{"ok":true,"machine":{"id":"lathe","name":"Torno editado","revision":8,"baudrate":4800,"bytesize":8,"parity":"N","stopbits":1,"flow_control":"none","line_terminator":"CRLF"}}"#
+        } else if path == "/v1/programs/search" {
+            body = #"{"results":[{"name":"O1.nc","path":"old/O1.nc","kind":"file","size":12,"modified":1000},{"name":"O3.nc","path":"new/O3.nc","kind":"file","size":12,"modified":3000},{"name":"O2.nc","path":"unknown/O2.nc","kind":"file","size":12,"modified":null}]}"#
         } else if path == "/v1/programs" {
             body = #"{"path":"","parent":null,"entries":[{"name":"O1.nc","path":"O1.nc","kind":"file","size":12,"modified":1000}],"version":1}"#
         } else {
@@ -40,7 +42,30 @@ final class WorkshopURLProtocol: URLProtocol, @unchecked Sendable {
 }
 
 @main struct WorkshopClientTests {
+    static func verifyProgramOrdering() {
+        func entry(_ name: String, _ timestamp: TimeInterval?, path: String? = nil) -> ProgramEntry {
+            ProgramEntry(name: name, path: path ?? name, isDirectory: false, size: 12,
+                         modified: timestamp.map { Date(timeIntervalSince1970: $0) })
+        }
+        let input = [entry("O1.nc", 10), entry("O10.nc", 20), entry("O2.nc", 20),
+                     entry("O0.nc", nil), entry("O9.nc", nil),
+                     entry("O2.nc", 20, path: "b/O2.nc"), entry("O2.nc", 20, path: "a/O2.nc")]
+        let original = input
+        let recent = ProgramSortOrder.latestUpdated.sorted(input)
+        precondition(recent.map(\.path) == ["a/O2.nc", "b/O2.nc", "O2.nc", "O10.nc", "O1.nc", "O0.nc", "O9.nc"])
+        precondition(ProgramSortOrder.latestUpdated.sorted(Array(input.reversed())) == recent)
+        precondition(ProgramSortOrder.name.sorted(input).map(\.name) == ["O0.nc", "O1.nc", "O2.nc", "O2.nc", "O2.nc", "O9.nc", "O10.nc"])
+        precondition(ProgramSortOrder.latestUpdated.sorted([]).isEmpty)
+        precondition(ProgramSortOrder.latestUpdated.sorted([input[0]]) == [input[0]])
+        precondition(input == original)
+        let folders = [ProgramEntry(name: "Work", path: "Work", isDirectory: true, size: 0, modified: nil)]
+        let listing = DirectoryListing(path: "", breadcrumb: [], directories: folders, files: input)
+        _ = ProgramSortOrder.latestUpdated.sorted(listing.files)
+        precondition(listing.directories == folders && listing.files == input)
+    }
+
     static func main() async throws {
+        verifyProgramOrdering()
         URLProtocol.registerClass(WorkshopURLProtocol.self)
         let primary = "http://pc.invalid:47820"
         let fallbackKey = "zeuz.workshop.fallback:" + primary
@@ -59,6 +84,12 @@ final class WorkshopURLProtocol: URLProtocol, @unchecked Sendable {
         WorkshopURLProtocol.lock.withLock { WorkshopURLProtocol.primaryDown = true }
         let listing = try await client.list(path: "")
         precondition(listing.files.first?.name == "O1.nc")
+        precondition(listing.files.first?.modified == Date(timeIntervalSince1970: 1000))
+        // Active search uses the same order and the actual server modification dates.
+        let results = try await client.search(query: ".nc", limit: 300)
+        precondition(ProgramSortOrder.latestUpdated.sorted(results).map(\.path) == ["new/O3.nc", "old/O1.nc", "unknown/O2.nc"])
+        precondition(results[1].modified == Date(timeIntervalSince1970: 3000))
+        precondition(results[2].modified == nil)
         precondition(UserDefaults.standard.string(forKey: activeKey) == "http://pi.invalid:5000")
         // New actors used by AppModel must retain the selected live destination.
         let reconnected = ZeuzAgentProgramClient(settings: settings, token: "test-token")
@@ -91,6 +122,7 @@ final class WorkshopURLProtocol: URLProtocol, @unchecked Sendable {
         precondition(before == after)
         let calls = WorkshopURLProtocol.lock.withLock { WorkshopURLProtocol.requests }
         precondition(!calls.contains { $0.0 == "pi.invalid" && $0.1 == "POST /v1/dnc/send" })
+        print("PASS: newest-first/name ordering, ties, missing dates, server timestamps, active search and unchanged entries")
         print("PASS: mobile failover, persisted routing, profile revisions authenticated OTA decoding and no replay of uncertain sends/updates")
     }
 }

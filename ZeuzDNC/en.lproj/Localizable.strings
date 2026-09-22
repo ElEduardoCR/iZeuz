@@ -285,3 +285,7 @@
 "ZeuzDNC respondió algo inesperado. ¿Está ejecutándose el servicio?" = "ZeuzDNC returned an unexpected response. Is the service running?";
 "La máquina \"%@\" no existe en ZeuzDNC. Agrégala en ZeuzDNC y vuelve a sincronizar." = "Machine \"%@\" does not exist in ZeuzDNC. Add it in ZeuzDNC and sync again.";
 "ZeuzDNC reportó un error en el envío" = "ZeuzDNC reported a transfer error";
+
+"Ordenar por" = "Sort by";
+"Última actualización" = "Last updated";
+"Más recientes primero · Sin fecha al final" = "Newest first · Undated last";

@@ -10,6 +10,8 @@ struct ProgramBrowserView: View {
     @Binding var showsZeuzStatus: Bool
     let bottomClearance: CGFloat
 
+    @AppStorage("zeuz.programs.sortOrder") private var sortOrder: ProgramSortOrder = .latestUpdated
+
     @State private var showsNewProgram = false
     @State private var showsNewFolder = false
     @State private var newName = ""
@@ -133,6 +135,7 @@ struct ProgramBrowserView: View {
 
     private var content: some View {
         List {
+            sortSection
             if isSearchActive {
                 searchSection
             } else {
@@ -155,6 +158,21 @@ struct ProgramBrowserView: View {
                     title: "Carpeta vacia",
                     message: "Copia programas a esta carpeta desde Windows o Mac y apareceran solos."
                 )
+            }
+        }
+    }
+
+    private var sortSection: some View {
+        Section {
+            Picker("Ordenar por", selection: $sortOrder) {
+                ForEach(ProgramSortOrder.allCases, id: \.self) { order in
+                    Text(order.title).tag(order)
+                }
+            }
+            .pickerStyle(.menu)
+        } footer: {
+            if sortOrder == .latestUpdated {
+                Text("Más recientes primero · Sin fecha al final")
             }
         }
     }
@@ -205,7 +223,7 @@ struct ProgramBrowserView: View {
 
     private var filesSection: some View {
         Section {
-            ForEach(programs.listing.files) { entry in
+            ForEach(sortOrder.sorted(programs.listing.files)) { entry in
                 fileRow(entry)
             }
         } header: {
@@ -229,7 +247,7 @@ struct ProgramBrowserView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(programs.searchResults) { entry in
+                ForEach(sortOrder.sorted(programs.searchResults)) { entry in
                     fileRow(entry, showsPath: true)
                 }
             }

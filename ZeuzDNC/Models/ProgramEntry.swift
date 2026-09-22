@@ -88,3 +88,37 @@ extension ProgramEntry {
         return nil
     }
 }
+
+/// Orden de presentación compartido por la carpeta actual y la búsqueda.
+/// `modified` siempre procede del repositorio; ordenar no modifica metadatos.
+enum ProgramSortOrder: String, CaseIterable {
+    case latestUpdated
+    case name
+
+    var title: String {
+        switch self {
+        case .latestUpdated: L10n.text("Última actualización")
+        case .name: L10n.text("Nombre")
+        }
+    }
+
+    func sorted(_ entries: [ProgramEntry]) -> [ProgramEntry] {
+        entries.sorted { lhs, rhs in
+            if self == .latestUpdated, lhs.modified != rhs.modified {
+                switch (lhs.modified, rhs.modified) {
+                case let (left?, right?): return left > right
+                case (_?, nil): return true
+                case (nil, _?): return false
+                case (nil, nil): break
+                }
+            }
+            let names = lhs.name.localizedStandardCompare(rhs.name)
+            if names != .orderedSame { return names == .orderedAscending }
+            let paths = lhs.path.localizedStandardCompare(rhs.path)
+            if paths != .orderedSame { return paths == .orderedAscending }
+            // Desempate independiente del orden de llegada para nombres/rutas
+            // que la comparación natural considera equivalentes.
+            return lhs.path < rhs.path
+        }
+    }
+}
